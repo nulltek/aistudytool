@@ -21,9 +21,9 @@ import {
   type Unsubscribe,
 } from 'firebase/firestore'
 import { getFirestore } from 'firebase/firestore'
-import { lessons, type LessonContent } from './lessonData'
+import { lessons, type FocusTrack, type LessonContent } from './lessonData'
 import type { ModelId } from './modelGuide'
-import { levelFromXp, rankFromLevel } from './progression'
+import { levelFromXp } from './progression'
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -50,6 +50,7 @@ export type UserProfile = {
   rank: string
   completedCount: number
   chosenModel?: ModelId
+  focusTrack?: FocusTrack
 }
 
 export async function signInWithGoogle() {
@@ -80,34 +81,7 @@ export function signOut() {
 export async function ensureUserProfile(user: User) {
   const userRef = doc(db, 'users', user.uid)
   const snapshot = await getDoc(userRef)
-  if (snapshot.exists()) {
-    const completionSnapshot = await getDocs(collection(db, 'users', user.uid, 'completedLessons'))
-    const completed = new Set(completionSnapshot.docs.map((item) => item.id))
-    const earnedLessons = lessons.filter((lesson) => completed.has(lesson.id))
-    const xp = earnedLessons.reduce((sum, lesson) => sum + lesson.xp, 0)
-    const gems = earnedLessons.reduce((sum, lesson) => sum + lesson.gems, 0)
-    const level = levelFromXp(xp)
-    const rank = rankFromLevel(level).name
-    const profile = snapshot.data() as UserProfile
-
-    if (
-      profile.xp !== xp
-      || profile.gems !== gems
-      || profile.level !== level
-      || profile.rank !== rank
-      || profile.completedCount !== earnedLessons.length
-    ) {
-      await setDoc(userRef, {
-        xp,
-        gems,
-        level,
-        rank,
-        completedCount: earnedLessons.length,
-        updatedAt: serverTimestamp(),
-      }, { merge: true })
-    }
-    return
-  }
+  if (snapshot.exists()) return
   await setDoc(userRef, {
     displayName: user.displayName ?? 'AI Learner',
     email: user.email ?? '',
@@ -129,6 +103,13 @@ export async function saveChosenModel(user: User, chosenModel: ModelId) {
   }, { merge: true })
 }
 
+export async function saveFocusTrack(user: User, focusTrack: FocusTrack) {
+  await setDoc(doc(db, 'users', user.uid), {
+    focusTrack,
+    updatedAt: serverTimestamp(),
+  }, { merge: true })
+}
+
 export function watchAuth(callback: (user: User | null) => void) {
   return onAuthStateChanged(auth, callback)
 }
@@ -146,26 +127,18 @@ export function watchCompletions(uid: string, callback: (ids: string[]) => void)
 }
 
 export async function completeLesson(user: User, lesson: LessonContent) {
-  const userRef = doc(db, 'users', user.uid)
   const completionRef = doc(db, 'users', user.uid, 'completedLessons', lesson.id)
+  const completionSnapshot = await getDocs(collection(db, 'users', user.uid, 'completedLessons'))
+  const completedIds = new Set(completionSnapshot.docs.map((item) => item.id))
+  const oldXp = lessons.filter((item) => completedIds.has(item.id)).reduce((sum, item) => sum + item.xp, 0)
+  const oldLevel = levelFromXp(oldXp)
 
   return runTransaction(db, async (transaction) => {
-    const [profileSnapshot, completionSnapshot] = await Promise.all([
-      transaction.get(userRef),
-      transaction.get(completionRef),
-    ])
+    const savedCompletion = await transaction.get(completionRef)
 
-    if (completionSnapshot.exists()) {
-      return { alreadyCompleted: true, oldLevel: profileSnapshot.data()?.level ?? 1, newLevel: profileSnapshot.data()?.level ?? 1 }
+    if (savedCompletion.exists()) {
+      return { alreadyCompleted: true, oldLevel, newLevel: oldLevel }
     }
-
-    if (!profileSnapshot.exists()) throw new Error('Your learner profile is not ready yet.')
-
-    const current = profileSnapshot.data() as UserProfile
-    const xp = current.xp + lesson.xp
-    const gems = current.gems + lesson.gems
-    const newLevel = levelFromXp(xp)
-    const rank = rankFromLevel(newLevel).name
 
     transaction.set(completionRef, {
       lessonId: lesson.id,
@@ -174,15 +147,7 @@ export async function completeLesson(user: User, lesson: LessonContent) {
       quizScore: 1,
       completedAt: serverTimestamp(),
     })
-    transaction.update(userRef, {
-      xp,
-      gems,
-      level: newLevel,
-      rank,
-      completedCount: current.completedCount + 1,
-      updatedAt: serverTimestamp(),
-    })
 
-    return { alreadyCompleted: false, oldLevel: current.level, newLevel }
+    return { alreadyCompleted: false, oldLevel, newLevel: levelFromXp(oldXp + lesson.xp) }
   })
 }

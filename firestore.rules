@@ -6,46 +6,15 @@ service cloud.firestore {
       return request.auth != null && request.auth.uid == uid;
     }
 
-    function hasCompleted(uid, lessonId) {
-      return existsAfter(/databases/$(database)/documents/users/$(uid)/completedLessons/$(lessonId));
+    function isEasyLesson(lessonId) {
+      return lessonId in ['what-is-ai', 'ai-history', 'choose-your-model', 'use-ai-well'];
     }
 
-    function expectedXp(uid) {
-      return (hasCompleted(uid, 'what-is-ai') ? 50 : 0)
-        + (hasCompleted(uid, 'ai-history') ? 50 : 0)
-        + (hasCompleted(uid, 'llms-and-models') ? 75 : 0)
-        + (hasCompleted(uid, 'popular-llms') ? 75 : 0)
-        + (hasCompleted(uid, 'choose-your-model') ? 50 : 0)
-        + (hasCompleted(uid, 'install-gui') ? 75 : 0)
-        + (hasCompleted(uid, 'install-cli') ? 75 : 0);
-    }
-
-    function expectedGems(uid) {
-      return (hasCompleted(uid, 'what-is-ai') ? 10 : 0)
-        + (hasCompleted(uid, 'ai-history') ? 10 : 0)
-        + (hasCompleted(uid, 'llms-and-models') ? 15 : 0)
-        + (hasCompleted(uid, 'popular-llms') ? 15 : 0)
-        + (hasCompleted(uid, 'choose-your-model') ? 10 : 0)
-        + (hasCompleted(uid, 'install-gui') ? 15 : 0)
-        + (hasCompleted(uid, 'install-cli') ? 15 : 0);
-    }
-
-    function expectedCompletedCount(uid) {
-      return (hasCompleted(uid, 'what-is-ai') ? 1 : 0)
-        + (hasCompleted(uid, 'ai-history') ? 1 : 0)
-        + (hasCompleted(uid, 'llms-and-models') ? 1 : 0)
-        + (hasCompleted(uid, 'popular-llms') ? 1 : 0)
-        + (hasCompleted(uid, 'choose-your-model') ? 1 : 0)
-        + (hasCompleted(uid, 'install-gui') ? 1 : 0)
-        + (hasCompleted(uid, 'install-cli') ? 1 : 0);
-    }
-
-    function expectedLevel(uid) {
-      return expectedXp(uid) >= 300 ? 3 : (expectedXp(uid) >= 100 ? 2 : 1);
-    }
-
-    function expectedRank(uid) {
-      return expectedLevel(uid) >= 3 ? 'Bronze III' : (expectedLevel(uid) >= 2 ? 'Bronze II' : 'Bronze I');
+    function isMediumLesson(lessonId) {
+      return lessonId in [
+        'llms-and-models', 'popular-llms', 'install-gui', 'install-cli',
+        'prompt-anatomy', 'context-constraints', 'examples-iteration', 'verify-ai-output'
+      ] || lessonId.matches('^(coding|research|automation)-[a-z-]+-[1-4]$');
     }
 
     function validCompletion(lessonId, data) {
@@ -54,13 +23,8 @@ service cloud.firestore {
         && data.quizScore == 1
         && data.completedAt == request.time
         && (
-          (lessonId == 'what-is-ai' && data.xp == 50 && data.gems == 10)
-          || (lessonId == 'ai-history' && data.xp == 50 && data.gems == 10)
-          || (lessonId == 'llms-and-models' && data.xp == 75 && data.gems == 15)
-          || (lessonId == 'popular-llms' && data.xp == 75 && data.gems == 15)
-          || (lessonId == 'choose-your-model' && data.xp == 50 && data.gems == 10)
-          || (lessonId == 'install-gui' && data.xp == 75 && data.gems == 15)
-          || (lessonId == 'install-cli' && data.xp == 75 && data.gems == 15)
+          (isEasyLesson(lessonId) && data.xp == 50 && data.gems == 10)
+          || (isMediumLesson(lessonId) && data.xp == 75 && data.gems == 15)
         );
     }
 
@@ -70,7 +34,7 @@ service cloud.firestore {
       allow create: if owns(uid)
         && request.resource.data.keys().hasOnly([
           'displayName', 'email', 'photoURL', 'xp', 'gems', 'level', 'rank',
-          'completedCount', 'chosenModel', 'createdAt', 'updatedAt'
+          'completedCount', 'chosenModel', 'focusTrack', 'createdAt', 'updatedAt'
         ])
         && request.resource.data.xp == 0
         && request.resource.data.gems == 0
@@ -82,17 +46,13 @@ service cloud.firestore {
 
       allow update: if owns(uid)
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'displayName', 'photoURL', 'xp', 'gems', 'level', 'rank',
-          'completedCount', 'chosenModel', 'updatedAt'
+          'displayName', 'photoURL', 'chosenModel', 'focusTrack', 'updatedAt'
         ])
         && (!request.resource.data.keys().hasAny(['chosenModel'])
           || request.resource.data.chosenModel in ['chatgpt', 'claude', 'gemini', 'llama-local', 'deepseek'])
+        && (!request.resource.data.keys().hasAny(['focusTrack'])
+          || request.resource.data.focusTrack in ['coding', 'research', 'automation'])
         && request.resource.data.email == resource.data.email
-        && request.resource.data.xp == expectedXp(uid)
-        && request.resource.data.gems == expectedGems(uid)
-        && request.resource.data.completedCount == expectedCompletedCount(uid)
-        && request.resource.data.level == expectedLevel(uid)
-        && request.resource.data.rank == expectedRank(uid)
         && request.resource.data.updatedAt == request.time;
 
       allow delete: if false;

@@ -32,12 +32,14 @@ import {
   Menu,
   MessageSquareText,
   RotateCcw,
+  Search,
   Settings,
   ShieldCheck,
   Sparkles,
   Star,
   Target,
   Trophy,
+  Workflow,
   X,
   Zap,
 } from 'lucide-react'
@@ -45,6 +47,7 @@ import {
   completeLesson,
   ensureUserProfile,
   finishRedirectSignIn,
+  saveFocusTrack,
   saveChosenModel,
   signInWithGoogle,
   signOut,
@@ -53,7 +56,7 @@ import {
   watchProfile,
   type UserProfile,
 } from './firebase'
-import { getLesson, lessons, rewardTiers, sectionOneLessons, sectionTwoLessons, type LessonContent, type LessonVisual } from './lessonData'
+import { getLesson, lessons, promptLessons, rewardTiers, sectionOneLessons, sectionTwoLessons, trackSections, type FocusTrack, type LessonContent, type LessonVisual } from './lessonData'
 import { chooserQuestions, getModelChoice, modelChoices, recommendModel, type InstallMethod, type ModelChoice, type ModelId } from './modelGuide'
 import { progressFromXp, rankFamilies, rankFromLevel } from './progression'
 
@@ -111,7 +114,17 @@ function useLearner() {
     }
   }, [user])
 
-  return { user, profile, completions, ready, error, setError }
+  const derivedProfile = useMemo(() => {
+    if (!profile) return null
+    const completed = new Set(completions)
+    const earned = lessons.filter((lesson) => completed.has(lesson.id))
+    const xp = earned.reduce((sum, lesson) => sum + lesson.xp, 0)
+    const gems = earned.reduce((sum, lesson) => sum + lesson.gems, 0)
+    const level = progressFromXp(xp).level
+    return { ...profile, xp, gems, level, rank: rankFromLevel(level).name, completedCount: earned.length }
+  }, [profile, completions])
+
+  return { user, profile: derivedProfile, completions, ready, error, setError }
 }
 
 function Brand() {
@@ -263,12 +276,17 @@ function BottomNav({ route }: { route: string }) {
 
 const lessonIcons = [BrainCircuit, History, Bot, Layers3, Target, ImageIcon, Code2]
 const lessonSides = ['center', 'right', 'left', 'center', 'left', 'right', 'center'] as const
+const focusOptions = [
+  { id: 'coding' as const, label: 'Coding', icon: Code2, copy: 'Build, debug, test, and ship software with AI.' },
+  { id: 'research' as const, label: 'Research', icon: Search, copy: 'Find, evaluate, synthesize, and present evidence.' },
+  { id: 'automation' as const, label: 'Automation', icon: Workflow, copy: 'Design reliable workflows with safe human review.' },
+]
 
 function Checkpoint({ lesson, index, completed, unlocked, unavailable = false, detail }: { lesson: LessonContent; index: number; completed: boolean; unlocked: boolean; unavailable?: boolean; detail?: string }) {
-  const Icon = lessonIcons[index]
+  const Icon = lessonIcons[index % lessonIcons.length]
   const state = unavailable ? 'skipped' : completed ? 'complete' : unlocked ? 'active' : 'locked'
   return (
-    <div className={`checkpoint-row ${lessonSides[index]}`}>
+    <div className={`checkpoint-row ${lessonSides[index % lessonSides.length]}`}>
       <button className={`checkpoint ${state} ${lesson.color}`} disabled={!unlocked || unavailable} onClick={() => goTo(`/lesson/${lesson.id}`)} aria-label={`${lesson.title}, ${state}`}>
         <span className="checkpoint-ring"><span className="checkpoint-face">{unavailable ? <Check size={27} /> : completed ? <Check size={29} strokeWidth={3.2} /> : unlocked ? <Icon size={27} /> : <LockKeyhole size={25} />}</span></span>
         {!completed && unlocked && !unavailable && <span className="start-flag">START</span>}
@@ -282,17 +300,41 @@ function Checkpoint({ lesson, index, completed, unlocked, unavailable = false, d
 
 function Dashboard({ user, profile, completions, route }: { user: User; profile: UserProfile; completions: string[]; route: string }) {
   const root = useRef<HTMLDivElement>(null)
-  const progress = (completions.length / lessons.length) * 100
+  const [focusTrack, setFocusTrack] = useState<FocusTrack | null>(profile.focusTrack ?? null)
+  const [savingTrack, setSavingTrack] = useState(false)
   const level = progressFromXp(profile.xp)
   const basicsDone = sectionOneLessons.every((lesson) => completions.includes(lesson.id))
+  const modelSectionDone = sectionTwoLessons.every((lesson) => completions.includes(lesson.id))
+  const promptsDone = promptLessons.every((lesson) => completions.includes(lesson.id))
   const chosenModel = getModelChoice(profile.chosenModel)
+  const focusSections = focusTrack ? trackSections[focusTrack] : []
+  const visibleLessons = [...sectionOneLessons, ...sectionTwoLessons, ...promptLessons, ...focusSections.flatMap((section) => section.lessons)]
+  const visibleCompleted = visibleLessons.filter((lesson) => completions.includes(lesson.id)).length
+  const progress = (visibleCompleted / visibleLessons.length) * 100
+
+  useEffect(() => {
+    if (profile.focusTrack) setFocusTrack(profile.focusTrack)
+  }, [profile.focusTrack])
+
+  const chooseFocusTrack = async (track: FocusTrack) => {
+    setFocusTrack(track)
+    setSavingTrack(true)
+    try {
+      await saveFocusTrack(user, track)
+    } finally {
+      setSavingTrack(false)
+    }
+  }
 
   useGSAP(() => {
     gsap.from('.course-hero', { y: 24, opacity: 0, duration: 0.75, ease: 'power3.out' })
     gsap.from('.checkpoint-row', { y: 35, opacity: 0, stagger: 0.12, duration: 0.65, ease: 'back.out(1.5)', scrollTrigger: { trigger: '.trail-wrap', start: 'top 80%' } })
     gsap.to('.checkpoint.active .checkpoint-ring', { y: -6, repeat: -1, yoyo: true, duration: 0.82, ease: 'sine.inOut' })
     gsap.to('.hero-art', { y: 45, opacity: 0.25, ease: 'none', scrollTrigger: { trigger: '.course-hero', start: 'top top+=80', end: 'bottom top', scrub: 1 } })
-  }, { scope: root })
+    gsap.utils.toArray<HTMLElement>('.track-section-card').forEach((card) => {
+      gsap.from(card, { y: 70, scale: .96, opacity: .25, ease: 'none', scrollTrigger: { trigger: card, start: 'top 92%', end: 'top 56%', scrub: .7 } })
+    })
+  }, { scope: root, dependencies: [focusTrack] })
 
   return (
     <div className="app" ref={root}>
@@ -307,7 +349,7 @@ function Dashboard({ user, profile, completions, route }: { user: User; profile:
                 <h1>Understand AI.<br />Start with the basics.</h1>
                 <p>Meet artificial intelligence, explore where it came from, and learn how models like LLMs work.</p>
                 <div className="hero-progress">
-                <div className="progress-copy"><span>Course progress</span><strong>{completions.length} of {lessons.length} lessons</strong></div>
+                <div className="progress-copy"><span>Your current path</span><strong>{visibleCompleted} of {visibleLessons.length} lessons</strong></div>
                   <div className="progress-track"><span style={{ width: `${Math.max(4, progress)}%` }} /></div>
                 </div>
               </div>
@@ -353,6 +395,54 @@ function Dashboard({ user, profile, completions, route }: { user: User; profile:
                   </div>
                 </div>
               </div>
+              <div className={`section-gate ${modelSectionDone ? 'open' : ''}`}><div className="gate-line" /><div className="gate-card"><span className="gate-icon">{modelSectionDone ? <Sparkles size={22} /> : <LockKeyhole size={22} />}</span><div><span>{modelSectionDone ? 'Section unlocked' : 'Finish your model setup'}</span><strong>Use AI and write clean prompts</strong></div><div className="gate-progress">{sectionTwoLessons.filter((lesson) => completions.includes(lesson.id)).length} / 4</div></div><div className="gate-line" /></div>
+              <div className={`prompt-section ${modelSectionDone ? '' : 'section-locked'}`}>
+                <div className="path-heading"><div><p>Prompting skills</p><h2>Use AI with intention</h2></div><span className="section-count">5 lessons · 36 min</span></div>
+                <p className="section-intro">Learn a practical ask, review, and refine loop. Then build prompts that give AI a clear job, useful context, and safe boundaries.</p>
+                <div className="trail-wrap prompt-trail">
+                  <svg className="trail-line" viewBox="0 0 400 940" preserveAspectRatio="none" aria-hidden="true"><path d="M200 62 C200 142 302 170 290 282 S100 390 112 502 S300 612 286 724 S180 850 200 890" /></svg>
+                  <div className="lesson-list">
+                    {promptLessons.map((lesson, localIndex) => {
+                      const completed = completions.includes(lesson.id)
+                      const previous = localIndex === 0 ? null : promptLessons[localIndex - 1]
+                      const unlocked = modelSectionDone && (localIndex === 0 || !!previous && completions.includes(previous.id) || completed)
+                      return <Checkpoint key={lesson.id} lesson={lesson} index={sectionOneLessons.length + sectionTwoLessons.length + localIndex} completed={completed} unlocked={unlocked} />
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              <div className={`focus-choice ${promptsDone ? 'ready' : 'locked'}`}>
+                <div className="focus-choice-copy"><p className="course-kicker">Shape the trail around your goal</p><h2>What will you use AI for?</h2><p>Pick a direction to reveal four complete sections. You can switch paths whenever your goal changes.</p></div>
+                <nav className="track-navbar" aria-label="Choose an AI learning focus">
+                  {focusOptions.map(({ id, label, icon: Icon, copy }) => <button className={focusTrack === id ? 'active' : ''} key={id} disabled={!promptsDone || savingTrack} onClick={() => chooseFocusTrack(id)}><Icon size={24} /><span><strong>{label}</strong><small>{copy}</small></span>{focusTrack === id && <Check size={20} />}</button>)}
+                </nav>
+                {!promptsDone && <div className="focus-lock"><LockKeyhole size={18} /> Complete all five prompting lessons to choose a specialist path.</div>}
+              </div>
+
+              {promptsDone && focusTrack && <div className="track-paths" key={focusTrack}>
+                <div className="track-path-intro"><div><p>{focusOptions.find((option) => option.id === focusTrack)?.label} path</p><h2>Four chapters. One practical skill stack.</h2></div><div className="track-marquee"><div><span>Learn</span><i /><span>Practice</span><i /><span>Review</span><i /><span>Ship</span><i /><span>Learn</span><i /><span>Practice</span></div></div></div>
+                {focusSections.map((section, sectionIndex) => {
+                  const previousSection = sectionIndex === 0 ? null : focusSections[sectionIndex - 1]
+                  const sectionUnlocked = sectionIndex === 0 || !!previousSection && previousSection.lessons.every((lesson) => completions.includes(lesson.id))
+                  const sectionCompleted = section.lessons.every((lesson) => completions.includes(lesson.id))
+                  return <article className={`track-section-card ${sectionUnlocked ? '' : 'section-locked'}`} key={section.id}>
+                    <div className="track-card-heading"><div><p>{sectionCompleted ? 'Chapter complete' : sectionUnlocked ? 'Ready to learn' : 'Finish the chapter above'}</p><h3>{section.title}</h3><span>{section.description}</span></div><strong>{section.lessons.filter((lesson) => completions.includes(lesson.id)).length}/4</strong></div>
+                    <div className="trail-wrap track-trail">
+                      <svg className="trail-line" viewBox="0 0 400 760" preserveAspectRatio="none" aria-hidden="true"><path d="M200 62 C200 130 104 176 112 274 S298 376 288 480 S190 610 200 704" /></svg>
+                      <div className="lesson-list">
+                        {section.lessons.map((lesson, localIndex) => {
+                          const completed = completions.includes(lesson.id)
+                          const previous = localIndex === 0 ? null : section.lessons[localIndex - 1]
+                          const unlocked = sectionUnlocked && (localIndex === 0 || !!previous && completions.includes(previous.id) || completed)
+                          const iconIndex = 12 + sectionIndex * 4 + localIndex
+                          return <Checkpoint key={lesson.id} lesson={lesson} index={iconIndex} completed={completed} unlocked={unlocked} />
+                        })}
+                      </div>
+                    </div>
+                  </article>
+                })}
+              </div>}
             </section>
           </main>
           <aside className="right-rail">
@@ -463,9 +553,8 @@ function ModelChooserPage({ user, completed }: { user: User; completed: boolean 
         <div className="chooser-mascot"><span className="match-badge">{answered}/4 answered</span><AiMascot /></div>
       </section>
       <section className="question-board" aria-label="AI model matching questions">
-        {chooserQuestions.map((question, questionIndex) => (
+        {chooserQuestions.map((question) => (
           <article className="question-card" key={question.id}>
-            <span className="question-number">0{questionIndex + 1}</span>
             <h2>{question.title}</h2>
             <div className="question-options">
               {question.options.map((option, optionIndex) => <button className={answers[question.id] === optionIndex ? 'selected' : ''} onClick={() => setAnswers((current) => ({ ...current, [question.id]: optionIndex }))} key={option.label}><span>{String.fromCharCode(65 + optionIndex)}</span>{option.label}{answers[question.id] === optionIndex && <Check size={17} />}</button>)}

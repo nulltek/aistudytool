@@ -144,6 +144,45 @@ button:focus-visible { outline: 3px solid #17211b; outline-offset: 3px; }
 .section-intro { max-width: 560px; margin: 18px 7px 0; color: #707871; font-size: 14px; line-height: 1.6; }
 .second-trail { height: 790px; margin-top: 14px; }
 .second-trail .lesson-list { grid-template-rows: repeat(4, 1fr); }
+.prompt-section { padding-top: 68px; transition: opacity .35s ease, filter .35s ease; }
+.prompt-section.section-locked { opacity: .42; filter: grayscale(.75); pointer-events: none; }
+.prompt-trail { height: 980px; }
+.prompt-trail .lesson-list { grid-template-rows: repeat(5, 1fr); }
+.focus-choice { position: relative; overflow: hidden; margin: 86px 0 0; padding: clamp(30px, 5vw, 58px); color: white; background: #17231b; border-radius: 30px; }
+.focus-choice::after { content: ''; position: absolute; right: -130px; top: -210px; width: 520px; height: 520px; border: 1px solid rgba(184,239,90,.17); border-radius: 50%; box-shadow: 0 0 0 58px rgba(184,239,90,.035), 0 0 0 116px rgba(184,239,90,.022); pointer-events: none; }
+.focus-choice.locked { filter: grayscale(.75); }
+.focus-choice-copy { position: relative; z-index: 2; max-width: 700px; }
+.focus-choice-copy h2 { max-width: 680px; margin: 0; font-family: 'Cabinet Grotesk', 'Satoshi', sans-serif; font-size: clamp(45px, 6vw, 76px); line-height: .92; letter-spacing: -.055em; }
+.focus-choice-copy > p:last-child { max-width: 560px; margin: 19px 0 0; color: #bdc7bf; font-size: 14px; line-height: 1.65; }
+.track-navbar { position: relative; z-index: 3; margin-top: 40px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; overflow: hidden; background: #344139; border: 1px solid #405047; border-radius: 18px; }
+.track-navbar button { min-height: 130px; display: grid; grid-template-columns: auto 1fr auto; align-items: start; gap: 12px; padding: 21px; color: #d0d8d1; background: #222f27; border: 0; text-align: left; cursor: pointer; transition: transform .35s cubic-bezier(.2,.8,.2,1), background .25s ease, color .25s ease; }
+.track-navbar button:hover:not(:disabled) { color: white; background: #2d3c33; transform: translateY(-4px); }
+.track-navbar button.active { color: #253613; background: var(--lime); }
+.track-navbar button:disabled { cursor: not-allowed; opacity: .52; }
+.track-navbar button > svg { margin-top: 1px; }
+.track-navbar button span, .track-navbar button strong, .track-navbar button small { display: block; }
+.track-navbar button strong { font-size: 16px; }
+.track-navbar button small { margin-top: 7px; color: inherit; opacity: .7; font-size: 10px; line-height: 1.45; }
+.focus-lock { position: relative; z-index: 2; margin-top: 17px; display: flex; align-items: center; gap: 8px; color: #aeb8b0; font-size: 11px; }
+.track-paths { margin-top: 88px; }
+.track-path-intro { min-height: 300px; display: grid; align-content: center; gap: 32px; padding: clamp(35px, 6vw, 70px); color: white; background: #2a2338; border-radius: 30px; }
+.track-path-intro p { margin: 0 0 10px; color: #c2ff65; font-size: 11px; font-weight: 780; text-transform: uppercase; letter-spacing: .09em; }
+.track-path-intro h2 { max-width: 720px; margin: 0; font-family: 'Cabinet Grotesk', 'Satoshi', sans-serif; font-size: clamp(42px, 6vw, 72px); line-height: .92; letter-spacing: -.055em; }
+.track-marquee { overflow: hidden; padding: 12px 0; border-top: 1px solid rgba(255,255,255,.14); border-bottom: 1px solid rgba(255,255,255,.14); }
+.track-marquee > div { width: max-content; display: flex; align-items: center; gap: 18px; color: #b9b2c4; animation: marquee 18s linear infinite; font-size: 11px; font-weight: 760; text-transform: uppercase; letter-spacing: .09em; }
+.track-marquee i { width: 5px; height: 5px; background: var(--lime); border-radius: 50%; }
+.track-section-card { position: sticky; top: 88px; min-height: 930px; margin-top: 74px; overflow: hidden; padding: clamp(24px, 4vw, 42px); background: #fbfbf8; border: 1px solid #dde1da; border-radius: 30px; box-shadow: 0 -18px 55px rgba(24,35,27,.08), 0 22px 65px rgba(24,35,27,.1); }
+.track-section-card:nth-of-type(2) { background: #f5f7ef; }
+.track-section-card:nth-of-type(3) { background: #f5f2ff; }
+.track-section-card:nth-of-type(4) { background: #fff8ed; }
+.track-section-card.section-locked { position: relative; top: auto; filter: grayscale(.8); opacity: .44; pointer-events: none; }
+.track-card-heading { display: grid; grid-template-columns: 1fr auto; gap: 25px; align-items: start; padding-bottom: 28px; border-bottom: 1px solid #dfe2dc; }
+.track-card-heading p { margin: 0 0 7px; color: #7f887f; font-size: 10px; font-weight: 780; text-transform: uppercase; letter-spacing: .08em; }
+.track-card-heading h3 { margin: 0; font-family: 'Cabinet Grotesk', 'Satoshi', sans-serif; font-size: clamp(35px, 5vw, 56px); line-height: .95; letter-spacing: -.05em; }
+.track-card-heading span { max-width: 520px; display: block; margin-top: 13px; color: #727a73; font-size: 13px; line-height: 1.55; }
+.track-card-heading > strong { width: 54px; height: 54px; display: grid; place-items: center; color: #3b5b0a; background: var(--lime); border-radius: 16px; box-shadow: 0 6px 0 #7da830; font-size: 13px; }
+.track-trail { height: 760px; margin-top: 4px; }
+.track-trail .lesson-list { grid-template-rows: repeat(4, 1fr); }
 
 .right-rail { position: sticky; top: 103px; display: grid; gap: 18px; }
 .daily-card, .tip-card { background: white; border: 1px solid var(--line); border-radius: 20px; }
@@ -546,8 +585,7 @@ button:focus-visible { outline: 3px solid #17211b; outline-offset: 3px; }
 .question-board { width: min(100%, 1220px); margin: 0 auto; display: grid; grid-template-columns: 1fr 1fr; gap: 2px; overflow: hidden; background: #dfe2dc; border: 1px solid #d9dcd6; border-radius: 28px; }
 .question-card { min-height: 395px; position: relative; padding: clamp(27px, 4vw, 48px); background: #fff; }
 .question-card:nth-child(2), .question-card:nth-child(3) { background: #fbfbf8; }
-.question-number { color: #94a08f; font-family: 'Cabinet Grotesk', sans-serif; font-size: 14px; font-weight: 800; letter-spacing: .08em; }
-.question-card h2 { max-width: 440px; margin: 18px 0 25px; font-family: 'Cabinet Grotesk', sans-serif; font-size: clamp(27px, 3vw, 40px); line-height: 1; letter-spacing: -.045em; }
+.question-card h2 { max-width: 440px; margin: 0 0 25px; font-family: 'Cabinet Grotesk', sans-serif; font-size: clamp(27px, 3vw, 40px); line-height: 1; letter-spacing: -.045em; }
 .question-options { display: grid; gap: 9px; }
 .question-options button { min-height: 54px; display: grid; grid-template-columns: 31px 1fr auto; align-items: center; gap: 11px; padding: 9px 12px; color: #4d554e; background: #f5f6f2; border: 1px solid #e1e4de; border-radius: 13px; text-align: left; cursor: pointer; transition: .2s ease; }
 .question-options button > span { width: 30px; height: 30px; display: grid; place-items: center; color: #7a837b; background: white; border-radius: 8px; font-size: 10px; font-weight: 850; }
@@ -593,6 +631,9 @@ button:focus-visible { outline: 3px solid #17211b; outline-offset: 3px; }
   .question-card { min-height: auto; }
   .model-accordion { min-height: 390px; flex-direction: column; }
   .model-accordion button, .model-accordion button:hover, .model-accordion button.selected { flex: 1 1 0; min-height: 70px; transform: none; }
+  .track-navbar { grid-template-columns: 1fr; }
+  .track-navbar button { min-height: 92px; }
+  .track-section-card { position: relative; top: auto; }
 }
 @media (max-width: 600px) {
   .auth-page { padding: 18px 18px 40px; }
@@ -638,4 +679,13 @@ button:focus-visible { outline: 3px solid #17211b; outline-offset: 3px; }
   .model-result { padding: 38px 22px; border-radius: 22px; }
   .result-copy h2 { font-size: 64px; }
   .model-accordion button strong { font-size: 21px; }
+  .focus-choice { margin-top: 54px; padding: 36px 22px; border-radius: 23px; }
+  .focus-choice-copy h2 { font-size: 47px; }
+  .track-paths { margin-top: 55px; }
+  .track-path-intro { min-height: 330px; padding: 35px 23px; border-radius: 23px; }
+  .track-path-intro h2 { font-size: 45px; }
+  .track-section-card { min-height: 900px; margin-top: 32px; padding: 26px 16px; border-radius: 23px; }
+  .track-card-heading { padding: 0 8px 24px; }
+  .track-card-heading h3 { font-size: 38px; }
+  .track-card-heading > strong { width: 46px; height: 46px; }
 }
