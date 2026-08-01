@@ -51,6 +51,24 @@ export type UserProfile = {
   completedCount: number
   chosenModel?: ModelId
   focusTrack?: FocusTrack
+  preferences?: UserPreferences
+  deactivated?: boolean
+}
+
+export type ThemePreference = 'light' | 'dark' | 'system'
+
+export type UserPreferences = {
+  theme: ThemePreference
+  soundEnabled: boolean
+  reducedMotion: boolean
+  emailReminders: boolean
+}
+
+export const defaultPreferences: UserPreferences = {
+  theme: 'light',
+  soundEnabled: true,
+  reducedMotion: false,
+  emailReminders: false,
 }
 
 export async function signInWithGoogle() {
@@ -91,6 +109,8 @@ export async function ensureUserProfile(user: User) {
     level: 1,
     rank: 'Bronze I',
     completedCount: 0,
+    preferences: defaultPreferences,
+    deactivated: false,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   })
@@ -106,6 +126,30 @@ export async function saveChosenModel(user: User, chosenModel: ModelId) {
 export async function saveFocusTrack(user: User, focusTrack: FocusTrack) {
   await setDoc(doc(db, 'users', user.uid), {
     focusTrack,
+    updatedAt: serverTimestamp(),
+  }, { merge: true })
+}
+
+export async function saveUserPreferences(user: User, preferences: UserPreferences) {
+  await setDoc(doc(db, 'users', user.uid), {
+    preferences,
+    updatedAt: serverTimestamp(),
+  }, { merge: true })
+}
+
+export async function deactivateProfile(user: User) {
+  await setDoc(doc(db, 'users', user.uid), {
+    deactivated: true,
+    deactivatedAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  }, { merge: true })
+  await firebaseSignOut(auth)
+}
+
+export async function reactivateProfile(user: User) {
+  await setDoc(doc(db, 'users', user.uid), {
+    deactivated: false,
+    deactivatedAt: null,
     updatedAt: serverTimestamp(),
   }, { merge: true })
 }

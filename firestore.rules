@@ -37,24 +37,49 @@ service cloud.firestore {
       allow create: if owns(uid)
         && request.resource.data.keys().hasOnly([
           'displayName', 'email', 'photoURL', 'xp', 'gems', 'level', 'rank',
-          'completedCount', 'chosenModel', 'focusTrack', 'createdAt', 'updatedAt'
+          'completedCount', 'chosenModel', 'focusTrack', 'preferences', 'deactivated',
+          'createdAt', 'updatedAt'
         ])
         && request.resource.data.xp == 0
         && request.resource.data.gems == 0
         && request.resource.data.level == 1
         && request.resource.data.rank == 'Bronze I'
         && request.resource.data.completedCount == 0
+        && request.resource.data.deactivated == false
+        && request.resource.data.preferences.keys().hasOnly([
+          'theme', 'soundEnabled', 'reducedMotion', 'emailReminders'
+        ])
+        && request.resource.data.preferences.theme in ['light', 'dark', 'system']
+        && request.resource.data.preferences.soundEnabled is bool
+        && request.resource.data.preferences.reducedMotion is bool
+        && request.resource.data.preferences.emailReminders is bool
         && request.resource.data.createdAt == request.time
         && request.resource.data.updatedAt == request.time;
 
       allow update: if owns(uid)
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'displayName', 'photoURL', 'chosenModel', 'focusTrack', 'updatedAt'
+          'displayName', 'photoURL', 'chosenModel', 'focusTrack', 'updatedAt',
+          'preferences', 'deactivated', 'deactivatedAt'
         ])
         && (!request.resource.data.keys().hasAny(['chosenModel'])
           || request.resource.data.chosenModel in ['chatgpt', 'claude', 'gemini', 'llama-local', 'deepseek'])
         && (!request.resource.data.keys().hasAny(['focusTrack'])
           || request.resource.data.focusTrack in ['coding', 'research', 'automation'])
+        && (!request.resource.data.keys().hasAny(['preferences'])
+          || (
+            request.resource.data.preferences.keys().hasOnly([
+              'theme', 'soundEnabled', 'reducedMotion', 'emailReminders'
+            ])
+            && request.resource.data.preferences.theme in ['light', 'dark', 'system']
+            && request.resource.data.preferences.soundEnabled is bool
+            && request.resource.data.preferences.reducedMotion is bool
+            && request.resource.data.preferences.emailReminders is bool
+          ))
+        && (!request.resource.data.keys().hasAny(['deactivated'])
+          || request.resource.data.deactivated is bool)
+        && (!request.resource.data.keys().hasAny(['deactivatedAt'])
+          || request.resource.data.deactivatedAt == null
+          || request.resource.data.deactivatedAt == request.time)
         && request.resource.data.email == resource.data.email
         && request.resource.data.updatedAt == request.time;
 

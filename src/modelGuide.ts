@@ -1,3 +1,5 @@
+import type { LessonContent, LessonVisual } from './lessonData'
+
 export type ModelId = 'chatgpt' | 'claude' | 'gemini' | 'llama-local' | 'deepseek'
 export type InstallMethod = 'gui' | 'cli'
 
@@ -214,6 +216,40 @@ export const chooserQuestions = [
 
 export function getModelChoice(id?: string | null) {
   return modelChoices.find((model) => model.id === id)
+}
+
+export function makeInstallLesson(base: LessonContent, model: ModelChoice, method: InstallMethod): LessonContent {
+  const guide = model[method]
+  const methodName = method === 'gui' ? 'desktop app' : 'command-line tool'
+  const visuals: LessonVisual[] = method === 'gui' ? ['model', 'examples', 'judgment'] : ['tokens', 'prompts', 'judgment']
+
+  if (!guide.available) return {
+    ...base,
+    title: `${model.name} has no official ${methodName}`,
+    shortTitle: `No official ${method === 'gui' ? 'desktop app' : 'CLI'}`,
+    description: `Learn why this setup checkpoint is skipped safely for ${model.name}.`,
+    sourceUrl: guide.sourceUrl,
+    slides: [
+      { title: `No official ${methodName} is available`, body: `${model.provider} does not currently provide an official ${methodName} for ${model.name}. Avoid unofficial substitutes that request credentials or broad computer access.`, visual: 'judgment' },
+      { title: 'Use a supported route instead', body: `Use ${model.name}'s official web, app, or API experience. The unavailable setup checkpoint grants its reward automatically so the learning path can continue.`, visual: 'growth' },
+    ],
+    quiz: { question: `What should you do when ${model.name} has no official ${methodName}?`, options: ['Use its supported official route', 'Install a random unofficial substitute', 'Share credentials with a download site', 'Disable computer security'], correctIndex: 0, explanation: 'Use a supported official route and avoid untrusted substitutes.' },
+  }
+
+  return {
+    ...base,
+    title: `Install ${model.name}'s ${methodName}`,
+    shortTitle: `${method === 'gui' ? 'Desktop' : 'CLI'}: ${model.name}`,
+    description: `A safe, guided setup for ${guide.label}.`,
+    sourceUrl: guide.sourceUrl,
+    slides: guide.steps.map((step, index) => ({ ...step, visual: visuals[index % visuals.length] })),
+    quiz: {
+      question: `Where should you get ${guide.label}?`,
+      options: ['Its official website or documentation', 'A random download mirror', 'An email attachment from a stranger', 'A cracked software bundle'],
+      correctIndex: 0,
+      explanation: `Use the official ${model.provider} or tool website. This reduces the risk of fake or modified installers.`,
+    },
+  }
 }
 
 export function recommendModel(answers: Record<string, number>) {

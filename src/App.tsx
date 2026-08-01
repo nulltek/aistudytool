@@ -15,7 +15,6 @@ import {
   Check,
   ChevronRight,
   CircleUserRound,
-  Clock3,
   Code2,
   Crown,
   Flame,
@@ -28,38 +27,52 @@ import {
   LoaderCircle,
   LockKeyhole,
   LogOut,
+  Moon,
   Mail,
   Menu,
   MessageSquareText,
+  Monitor,
+  PauseCircle,
+  Play,
   RotateCcw,
   Search,
   Settings,
   ShieldCheck,
+  Shuffle,
+  SlidersHorizontal,
   Sparkles,
-  Star,
+  Sun,
   Target,
   Trophy,
+  UserX,
+  Volume2,
   Workflow,
   X,
   Zap,
 } from 'lucide-react'
 import {
   completeLesson,
+  deactivateProfile,
+  defaultPreferences,
   ensureUserProfile,
   finishRedirectSignIn,
+  reactivateProfile,
   saveFocusTrack,
   saveChosenModel,
+  saveUserPreferences,
   signInWithGoogle,
   signOut,
   watchAuth,
   watchCompletions,
   watchProfile,
   type UserProfile,
+  type UserPreferences,
 } from './firebase'
 import { adaptiveUsageGroups, adaptiveUsageLessons, getLesson, lessons, promptLessons, rewardTiers, sectionOneLessons, sectionTwoLessons, trackSections, type FocusTrack, type LessonContent, type LessonVisual } from './lessonData'
-import { chooserQuestions, getModelChoice, modelChoices, recommendModel, type InstallMethod, type ModelChoice, type ModelId } from './modelGuide'
+import { chooserQuestions, getModelChoice, makeInstallLesson, modelChoices, recommendModel, type InstallMethod, type ModelChoice, type ModelId } from './modelGuide'
 import { progressFromXp, rankFamilies, rankFromLevel } from './progression'
 import { makeAdaptiveUsageLesson } from './adaptiveUsage'
+import { buildQuestionBank, getPracticeSections, pickPracticeSession, PRACTICE_SESSION_SIZE, QUESTION_BANK_SIZE, type PracticeQuestion, type PracticeSection } from './practiceData'
 
 gsap.registerPlugin(ScrollTrigger, useGSAP)
 
@@ -128,6 +141,23 @@ function useLearner() {
   return { user, profile: derivedProfile, completions, ready, error, setError }
 }
 
+function useAppliedPreferences(profile: UserProfile | null) {
+  const preferences = profile?.preferences ?? defaultPreferences
+
+  useEffect(() => {
+    const media = window.matchMedia('(prefers-color-scheme: dark)')
+    const apply = () => {
+      const resolvedTheme = preferences.theme === 'system' ? media.matches ? 'dark' : 'light' : preferences.theme
+      document.documentElement.dataset.theme = resolvedTheme
+      document.documentElement.dataset.reducedMotion = preferences.reducedMotion ? 'true' : 'false'
+      gsap.globalTimeline.timeScale(preferences.reducedMotion ? 1000 : 1)
+    }
+    apply()
+    media.addEventListener('change', apply)
+    return () => media.removeEventListener('change', apply)
+  }, [preferences.theme, preferences.reducedMotion])
+}
+
 function Brand() {
   return (
     <button className="brand brand-button" onClick={() => goTo('/')} aria-label="Model Trail home">
@@ -176,6 +206,34 @@ function LoadingScreen() {
   )
 }
 
+function DeactivatedScreen({ user }: { user: User }) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  const restore = async () => {
+    setBusy(true)
+    setError('')
+    try {
+      await reactivateProfile(user)
+    } catch (reason) {
+      setError((reason as Error).message || 'Your profile could not be reactivated.')
+      setBusy(false)
+    }
+  }
+
+  return <main className="deactivated-page">
+    <div className="deactivated-mark"><PauseCircle size={42} /></div>
+    <p className="course-kicker">Profile paused</p>
+    <h1>Your trail is safe and waiting.</h1>
+    <p>Reactivate to restore access to lessons, practice, ranks, gems, and saved progress.</p>
+    {error && <div className="auth-error" role="alert">{error}</div>}
+    <div className="deactivated-actions">
+      <button className="continue-button" onClick={restore} disabled={busy}>{busy ? <LoaderCircle className="loading-spinner" size={19} /> : 'Reactivate profile'} {!busy && <ArrowRight size={19} />}</button>
+      <button className="secondary-action" onClick={() => signOut()}>Use another account</button>
+    </div>
+  </main>
+}
+
 function AuthScreen({ error, setError }: { error: string; setError: (value: string) => void }) {
   const [busy, setBusy] = useState(false)
 
@@ -222,7 +280,7 @@ function AuthScreen({ error, setError }: { error: string; setError: (value: stri
 
 const navItems = [
   { label: 'Learn', icon: Home, path: '/' },
-  { label: 'Practice', icon: Target, path: '/' },
+  { label: 'Practice', icon: Target, path: '/practice' },
   { label: 'Ranks', icon: Trophy, path: '/profile' },
   { label: 'Profile', icon: CircleUserRound, path: '/profile' },
 ]
@@ -239,7 +297,7 @@ function Sidebar({ user, profile, route }: { user: User; profile: UserProfile; r
         ))}
       </nav>
       <div className="sidebar-foot">
-        <button className="nav-item"><Settings size={21} /><span>Settings</span></button>
+        <button className={`nav-item ${route === '/settings' ? 'active' : ''}`} onClick={() => goTo('/settings')}><Settings size={21} /><span>Settings</span></button>
         <button className="profile-chip profile-chip-button" onClick={() => goTo('/profile')}>
           {user.photoURL ? <img className="avatar-photo" src={user.photoURL} alt="" referrerPolicy="no-referrer" /> : <div className="avatar">{profile.displayName.slice(0, 2).toUpperCase()}</div>}
           <div><strong>{profile.displayName}</strong><span>Level {profile.level} · {profile.rank}</span></div>
@@ -520,26 +578,6 @@ function LessonIllustration({ visual }: { visual: LessonVisual }) {
 
 type RewardResult = { alreadyCompleted: boolean; oldLevel: number; newLevel: number }
 
-function makeInstallLesson(base: LessonContent, model: ModelChoice, method: InstallMethod): LessonContent {
-  const guide = model[method]
-  const methodName = method === 'gui' ? 'desktop app' : 'command-line tool'
-  const visuals: LessonVisual[] = method === 'gui' ? ['model', 'examples', 'judgment'] : ['tokens', 'prompts', 'judgment']
-  return {
-    ...base,
-    title: `Install ${model.name}'s ${methodName}`,
-    shortTitle: `${method === 'gui' ? 'Desktop' : 'CLI'}: ${model.name}`,
-    description: `A safe, guided setup for ${guide.label}.`,
-    sourceUrl: guide.sourceUrl,
-    slides: guide.steps.map((step, index) => ({ ...step, visual: visuals[index % visuals.length] })),
-    quiz: {
-      question: `Where should you get ${guide.label}?`,
-      options: ['Its official website or documentation', 'A random download mirror', 'An email attachment from a stranger', 'A cracked software bundle'],
-      correctIndex: 0,
-      explanation: `Use the official ${model.provider} or tool website. This reduces the risk of fake or modified installers.`,
-    },
-  }
-}
-
 function ModelChooserPage({ user, completed }: { user: User; completed: boolean }) {
   const root = useRef<HTMLElement>(null)
   const [answers, setAnswers] = useState<Record<string, number>>({})
@@ -616,7 +654,7 @@ function UnavailableLessonPage({ model, method }: { model: ModelChoice; method: 
   return <main className="unavailable-page"><button className="lesson-exit" onClick={() => goTo('/')}><X size={22} /></button><div className="unavailable-icon"><Check size={42} /></div><p className="course-kicker">Checkpoint skipped safely</p><h1>No official {method === 'gui' ? 'desktop app' : 'CLI'} for {model.name}.</h1><p>This checkpoint is greyed out and its XP and gems were granted automatically. You do not need to install an unofficial substitute.</p><button className="continue-button" onClick={() => goTo('/')}>Back to the trail <ArrowRight size={19} /></button></main>
 }
 
-function LessonPage({ user, profile, lesson, completed }: { user: User; profile: UserProfile; lesson: LessonContent; completed: boolean }) {
+function LessonPage({ user, lesson, completed }: { user: User; lesson: LessonContent; completed: boolean }) {
   const [step, setStep] = useState(0)
   const [selectedAnswer, setSelectedAnswer] = useState<number | null>(null)
   const [answerState, setAnswerState] = useState<'idle' | 'wrong' | 'correct'>('idle')
@@ -747,7 +785,7 @@ function ProfilePage({ user, profile, completions, route }: { user: User; profil
               {user.photoURL ? <img src={user.photoURL} alt="" referrerPolicy="no-referrer" /> : <div className="profile-avatar-fallback">{profile.displayName.slice(0, 2).toUpperCase()}</div>}
               <div><p>Your learner profile</p><h1>{profile.displayName}</h1><span>{profile.rank} · Level {profile.level}</span></div>
             </div>
-            <button className="signout-button" onClick={() => signOut()}><LogOut size={18} /> Sign out</button>
+            <div className="profile-actions"><button className="secondary-action" onClick={() => goTo('/settings')}><Settings size={18} /> Settings</button><button className="signout-button" onClick={() => signOut()}><LogOut size={18} /> Sign out</button></div>
           </section>
           <section className="profile-stats">
             <div><Zap size={23} /><span>Total XP</span><strong>{profile.xp}</strong></div>
@@ -785,13 +823,270 @@ function ProfilePage({ user, profile, completions, route }: { user: User; profil
   )
 }
 
+function SettingToggle({ checked, label, copy, onChange }: { checked: boolean; label: string; copy: string; onChange: (checked: boolean) => void }) {
+  return <button className={`setting-toggle ${checked ? 'on' : ''}`} role="switch" aria-checked={checked} onClick={() => onChange(!checked)}>
+    <span><strong>{label}</strong><small>{copy}</small></span>
+    <i><b /></i>
+  </button>
+}
+
+function SettingsPage({ user, profile, route }: { user: User; profile: UserProfile; route: string }) {
+  const root = useRef<HTMLDivElement>(null)
+  const [preferences, setPreferences] = useState<UserPreferences>(profile.preferences ?? defaultPreferences)
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  const [confirmingDeactivation, setConfirmingDeactivation] = useState(false)
+  const [deactivating, setDeactivating] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => setPreferences(profile.preferences ?? defaultPreferences), [profile.preferences])
+
+  const updatePreference = async (next: UserPreferences) => {
+    setPreferences(next)
+    setSaveState('saving')
+    setError('')
+    try {
+      await saveUserPreferences(user, next)
+      setSaveState('saved')
+    } catch (reason) {
+      setSaveState('error')
+      setError((reason as Error).message || 'Settings could not be saved.')
+    }
+  }
+
+  const deactivate = async () => {
+    setDeactivating(true)
+    setError('')
+    try {
+      await deactivateProfile(user)
+    } catch (reason) {
+      setError((reason as Error).message || 'Profile could not be deactivated.')
+      setDeactivating(false)
+    }
+  }
+
+  useGSAP(() => {
+    gsap.from('.settings-hero-copy > *', { y: 26, opacity: 0, stagger: .09, duration: .65, ease: 'power3.out' })
+    gsap.from('.settings-card', { y: 55, scale: .92, opacity: .2, stagger: .1, ease: 'none', scrollTrigger: { trigger: '.settings-grid', start: 'top 88%', end: 'top 48%', scrub: .7 } })
+  }, { scope: root })
+
+  return <div className="app" ref={root}>
+    <Sidebar user={user} profile={profile} route={route} />
+    <div className="workspace settings-workspace">
+      <Topbar profile={profile} />
+      <main className="settings-page">
+        <section className="settings-hero">
+          <div className="settings-hero-copy"><p>Make the trail yours</p><h1>Comfort, focus, and account control.</h1><span>Preferences follow your learner profile across sessions.</span></div>
+          <div className="settings-hero-art" aria-hidden="true"><SlidersHorizontal size={82} /><i /><i /><i /></div>
+        </section>
+
+        <div className="settings-status" aria-live="polite">{saveState === 'saving' ? 'Saving changes...' : saveState === 'saved' ? 'Changes saved' : saveState === 'error' ? 'Save failed' : 'Changes save automatically'}</div>
+        <section className="settings-grid">
+          <article className="settings-card appearance-card">
+            <div className="settings-card-heading"><span><Sun size={22} /></span><div><h2>Appearance</h2><p>Choose how Model Trail looks.</p></div></div>
+            <div className="theme-switch" aria-label="Theme preference">
+              {([
+                { id: 'light' as const, label: 'Light', icon: Sun },
+                { id: 'dark' as const, label: 'Dark', icon: Moon },
+                { id: 'system' as const, label: 'System', icon: Monitor },
+              ]).map(({ id, label, icon: Icon }) => <button className={preferences.theme === id ? 'active' : ''} key={id} onClick={() => updatePreference({ ...preferences, theme: id })}><Icon size={19} /><span>{label}</span></button>)}
+            </div>
+          </article>
+
+          <article className="settings-card experience-card">
+            <div className="settings-card-heading"><span><Volume2 size={22} /></span><div><h2>Learning experience</h2><p>Control feedback and movement.</p></div></div>
+            <div className="setting-toggle-list">
+              <SettingToggle checked={preferences.soundEnabled} label="Sound effects" copy="Hear short practice feedback tones." onChange={(soundEnabled) => updatePreference({ ...preferences, soundEnabled })} />
+              <SettingToggle checked={preferences.reducedMotion} label="Reduce motion" copy="Minimize decorative movement and transitions." onChange={(reducedMotion) => updatePreference({ ...preferences, reducedMotion })} />
+            </div>
+          </article>
+
+          <article className="settings-card language-card">
+            <div className="settings-card-heading"><span><BookOpen size={22} /></span><div><h2>Language</h2><p>Course and interface language.</p></div></div>
+            <div className="language-value"><div><strong>English</strong><small>All lessons and practice questions</small></div><span>Current</span></div>
+          </article>
+
+          <article className="settings-card account-card">
+            <div className="settings-card-heading"><span><ShieldCheck size={22} /></span><div><h2>Account and privacy</h2><p>Control access without losing your learning history.</p></div></div>
+            <div className="account-summary"><div><span>Signed in as</span><strong>{profile.email}</strong></div><button className="secondary-action" onClick={() => signOut()}><LogOut size={17} /> Sign out</button></div>
+            <div className="danger-zone">
+              <div><UserX size={22} /><span><strong>Deactivate profile</strong><small>Pause access. XP, gems, ranks, choices, and lesson progress stay saved.</small></span></div>
+              {!confirmingDeactivation ? <button onClick={() => setConfirmingDeactivation(true)}>Deactivate</button> : <div className="deactivate-confirm"><p>You will be signed out. You can reactivate after signing in again.</p><div><button className="secondary-action" onClick={() => setConfirmingDeactivation(false)}>Cancel</button><button className="danger-button" onClick={deactivate} disabled={deactivating}>{deactivating ? <LoaderCircle className="loading-spinner" size={17} /> : 'Deactivate now'}</button></div></div>}
+            </div>
+          </article>
+        </section>
+        {error && <div className="auth-error settings-error" role="alert">{error}</div>}
+      </main>
+    </div>
+    <BottomNav route={route} />
+  </div>
+}
+
+function playPracticeTone(enabled: boolean, correct: boolean) {
+  if (!enabled) return
+  try {
+    const AudioContextClass = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+    if (!AudioContextClass) return
+    const context = new AudioContextClass()
+    const oscillator = context.createOscillator()
+    const gain = context.createGain()
+    oscillator.frequency.value = correct ? 620 : 220
+    oscillator.type = correct ? 'sine' : 'triangle'
+    gain.gain.setValueAtTime(.055, context.currentTime)
+    gain.gain.exponentialRampToValueAtTime(.001, context.currentTime + .16)
+    oscillator.connect(gain).connect(context.destination)
+    oscillator.start()
+    oscillator.stop(context.currentTime + .16)
+  } catch {
+    // Sound feedback is optional; practice continues when audio is unavailable.
+  }
+}
+
+type PracticeSession = { title: string; bank: PracticeQuestion[]; questions: PracticeQuestion[] }
+
+function PracticePage({ user, profile, completions, route }: { user: User; profile: UserProfile; completions: string[]; route: string }) {
+  const root = useRef<HTMLDivElement>(null)
+  const model = getModelChoice(profile.chosenModel)
+  const sections = useMemo(() => getPracticeSections(profile.focusTrack, model), [profile.focusTrack, model])
+  const completedSet = useMemo(() => new Set(completions), [completions])
+  const [session, setSession] = useState<PracticeSession | null>(null)
+  const [questionIndex, setQuestionIndex] = useState(0)
+  const [selectedAnswer, setSelectedAnswer] = useState<number | null>(null)
+  const [score, setScore] = useState(0)
+  const [finished, setFinished] = useState(false)
+  const preferences = profile.preferences ?? defaultPreferences
+
+  const startWithBank = (title: string, bank: PracticeQuestion[]) => {
+    const questions = pickPracticeSession(bank)
+    if (!questions.length) return
+    setSession({ title, bank, questions })
+    setQuestionIndex(0)
+    setSelectedAnswer(null)
+    setScore(0)
+    setFinished(false)
+    window.scrollTo(0, 0)
+  }
+
+  const startSection = (section: PracticeSection) => {
+    const completedLessons = section.lessons.filter((lesson) => completedSet.has(lesson.id))
+    startWithBank(section.title, buildQuestionBank({ ...section, lessons: completedLessons }))
+  }
+
+  const startGeneral = () => {
+    const bank = sections.flatMap((section) => {
+      const completedLessons = section.lessons.filter((lesson) => completedSet.has(lesson.id))
+      return buildQuestionBank({ ...section, id: `general-${section.id}`, lessons: completedLessons })
+    })
+    startWithBank('General revision', bank)
+  }
+
+  const choosePracticeAnswer = (index: number) => {
+    if (!session || selectedAnswer !== null) return
+    const correct = index === session.questions[questionIndex].correctIndex
+    setSelectedAnswer(index)
+    if (correct) setScore((value) => value + 1)
+    playPracticeTone(preferences.soundEnabled, correct)
+  }
+
+  const nextQuestion = () => {
+    if (!session) return
+    if (questionIndex === session.questions.length - 1) {
+      setFinished(true)
+      return
+    }
+    setQuestionIndex((value) => value + 1)
+    setSelectedAnswer(null)
+  }
+
+  useGSAP(() => {
+    gsap.from('.practice-hero-copy > *', { y: 28, opacity: 0, stagger: .09, duration: .65, ease: 'power3.out' })
+    gsap.from('.practice-section-card', { y: 60, scale: .82, opacity: .18, stagger: .09, ease: 'none', scrollTrigger: { trigger: '.practice-section-grid', start: 'top 91%', end: 'top 48%', scrub: .7 } })
+  }, { scope: root, dependencies: [session, finished] })
+
+  if (session && !finished) {
+    const question = session.questions[questionIndex]
+    const answered = selectedAnswer !== null
+    const correct = answered && selectedAnswer === question.correctIndex
+    return <main className="practice-session-page" ref={root}>
+      <header className="practice-session-top">
+        <button className="lesson-exit" onClick={() => setSession(null)} aria-label="Quit practice"><X size={22} /></button>
+        <div className="practice-progress"><span style={{ width: `${((questionIndex + 1) / session.questions.length) * 100}%` }} /></div>
+        <strong>{questionIndex + 1} of {session.questions.length}</strong>
+      </header>
+      <section className="practice-question-shell" key={question.id}>
+        <div className="practice-question-art"><Shuffle size={72} /><span>{session.title}</span><i /><i /></div>
+        <div className="practice-question-copy">
+          <p>Choose the best answer</p>
+          <h1>{question.prompt}</h1>
+          <div className="practice-answer-grid">
+            {question.options.map((option, index) => {
+              const isSelected = selectedAnswer === index
+              const isCorrect = answered && index === question.correctIndex
+              const state = isCorrect ? 'correct' : isSelected ? 'wrong' : ''
+              return <button className={state} key={`${question.id}-${index}`} onClick={() => choosePracticeAnswer(index)} disabled={answered}><span>{String.fromCharCode(65 + index)}</span><b>{option}</b>{isCorrect && <Check size={20} />}</button>
+            })}
+          </div>
+          {answered && <div className={`practice-feedback ${correct ? 'correct' : 'wrong'}`}><strong>{correct ? 'Correct.' : 'Review this one.'}</strong><span>{question.explanation}</span></div>}
+          <button className="continue-button practice-next" onClick={nextQuestion} disabled={!answered}>{questionIndex === session.questions.length - 1 ? 'See results' : 'Next question'} <ArrowRight size={19} /></button>
+        </div>
+      </section>
+    </main>
+  }
+
+  if (session && finished) return <main className="practice-result-page" ref={root}>
+    <div className="practice-result-orbit"><Target size={68} /><i /><i /><i /></div>
+    <p>{session.title} complete</p>
+    <h1>{score} out of {PRACTICE_SESSION_SIZE}</h1>
+    <span>{score === PRACTICE_SESSION_SIZE ? 'Strong recall. Your answers were all correct.' : 'Good practice. Review missed ideas and try a fresh random set.'}</span>
+    <div className="practice-result-actions"><button className="continue-button" onClick={() => startWithBank(session.title, session.bank)}><RotateCcw size={18} /> Practice again</button><button className="secondary-action" onClick={() => setSession(null)}>Choose another section</button></div>
+  </main>
+
+  const totalCompleted = sections.reduce((sum, section) => sum + section.lessons.filter((lesson) => completedSet.has(lesson.id)).length, 0)
+
+  return <div className="app" ref={root}>
+    <Sidebar user={user} profile={profile} route={route} />
+    <div className="workspace practice-workspace">
+      <Topbar profile={profile} />
+      <main className="practice-page">
+        <section className="practice-hero">
+          <div className="practice-hero-copy"><p>Recall makes knowledge stick</p><h1>Practice the path you have earned.</h1><span>Choose a section or mix every completed lesson into one five-question revision.</span></div>
+          <div className="practice-hero-art" aria-hidden="true"><Target size={105} /><span>5</span><i /><i /></div>
+        </section>
+
+        <section className="general-revision-card">
+          <div><Shuffle size={28} /><span><strong>General revision</strong><small>Random questions from every section and lesson you have completed.</small></span></div>
+          <div className="general-revision-meta"><span>{totalCompleted} completed lessons</span><b>{PRACTICE_SESSION_SIZE} questions</b></div>
+          <button onClick={startGeneral} disabled={totalCompleted === 0}><Play size={18} fill="currentColor" /> Start mixed practice</button>
+        </section>
+
+        <section className="practice-library">
+          <div className="practice-library-heading"><div><p>Focused review</p><h2>Choose a section</h2></div><span>{QUESTION_BANK_SIZE} questions in every section bank</span></div>
+          <div className="practice-section-grid">
+            {sections.map((section) => {
+              const completedLessons = section.lessons.filter((lesson) => completedSet.has(lesson.id)).length
+              const available = completedLessons > 0
+              return <article className={`practice-section-card ${available ? '' : 'locked'}`} key={section.id}>
+                <div className="practice-card-number">{completedLessons}/{section.lessons.length}</div>
+                <div><h3>{section.title}</h3><p>{section.description}</p></div>
+                <div className="practice-card-footer"><span>{available ? `${QUESTION_BANK_SIZE} question bank` : 'Complete a lesson to unlock'}</span><button disabled={!available} onClick={() => startSection(section)} aria-label={`Practice ${section.title}`}>{available ? <Play size={18} fill="currentColor" /> : <LockKeyhole size={18} />}</button></div>
+              </article>
+            })}
+          </div>
+        </section>
+      </main>
+    </div>
+    <BottomNav route={route} />
+  </div>
+}
+
 export default function App() {
   const route = useRoute()
   const { user, profile, completions, ready, error, setError } = useLearner()
+  useAppliedPreferences(profile)
 
   if (!ready) return <LoadingScreen />
   if (!user) return <AuthScreen error={error} setError={setError} />
   if (!profile) return <LoadingScreen />
+  if (profile.deactivated) return <DeactivatedScreen user={user} />
 
   if (route.startsWith('/lesson/')) {
     const lesson = getLesson(route.replace('/lesson/', ''))
@@ -803,7 +1098,7 @@ export default function App() {
         return <LoadingScreen />
       }
       if (!model[lesson.installMethod].available) return <UnavailableLessonPage model={model} method={lesson.installMethod} />
-      return <LessonPage user={user} profile={profile} lesson={makeInstallLesson(lesson, model, lesson.installMethod)} completed={completions.includes(lesson.id)} />
+      return <LessonPage user={user} lesson={makeInstallLesson(lesson, model, lesson.installMethod)} completed={completions.includes(lesson.id)} />
     }
     if (lesson?.kind === 'adaptive-usage') {
       const model = getModelChoice(profile.chosenModel)
@@ -811,11 +1106,13 @@ export default function App() {
         goTo('/lesson/choose-your-model')
         return <LoadingScreen />
       }
-      return <LessonPage user={user} profile={profile} lesson={makeAdaptiveUsageLesson(lesson, model)} completed={completions.includes(lesson.id)} />
+      return <LessonPage user={user} lesson={makeAdaptiveUsageLesson(lesson, model)} completed={completions.includes(lesson.id)} />
     }
-    if (lesson) return <LessonPage user={user} profile={profile} lesson={lesson} completed={completions.includes(lesson.id)} />
+    if (lesson) return <LessonPage user={user} lesson={lesson} completed={completions.includes(lesson.id)} />
   }
 
   if (route === '/profile') return <ProfilePage user={user} profile={profile} completions={completions} route={route} />
+  if (route === '/practice') return <PracticePage user={user} profile={profile} completions={completions} route={route} />
+  if (route === '/settings') return <SettingsPage user={user} profile={profile} route={route} />
   return <Dashboard user={user} profile={profile} completions={completions} route={route} />
 }
