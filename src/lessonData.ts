@@ -14,7 +14,7 @@ export type Quiz = {
 }
 
 export type LessonContent = {
-  id: 'what-is-ai' | 'ai-history' | 'llms-and-models'
+  id: 'what-is-ai' | 'ai-history' | 'llms-and-models' | 'popular-llms' | 'choose-your-model' | 'install-gui' | 'install-cli'
   title: string
   shortTitle: string
   description: string
@@ -23,6 +23,9 @@ export type LessonContent = {
   xp: number
   gems: number
   color: 'lime' | 'orange' | 'violet'
+  kind?: 'standard' | 'chooser' | 'install'
+  installMethod?: 'gui' | 'cli'
+  sourceUrl?: string
   slides: LessonSlide[]
   quiz: Quiz
 }
@@ -33,7 +36,7 @@ export const rewardTiers = {
   Hard: { xp: 100, gems: 20 },
 } as const
 
-export const lessons: LessonContent[] = [
+export const sectionOneLessons: LessonContent[] = [
   {
     id: 'what-is-ai',
     title: 'What is AI?',
@@ -182,6 +185,104 @@ export const lessons: LessonContent[] = [
     },
   },
 ]
+
+export const sectionTwoLessons: LessonContent[] = [
+  {
+    id: 'popular-llms',
+    title: 'Meet the main AI models',
+    shortTitle: 'Popular AI models',
+    description: 'Compare five widely used AI choices and learn why the best model depends on the job.',
+    duration: '8 min',
+    difficulty: 'Medium',
+    xp: rewardTiers.Medium.xp,
+    gems: rewardTiers.Medium.gems,
+    color: 'violet',
+    slides: [
+      {
+        title: 'ChatGPT is a flexible all-rounder',
+        body: 'OpenAI’s ChatGPT is a broad assistant for writing, learning, research, images, and everyday problem-solving. Developers can also use Codex for command-line coding work.',
+        visual: 'prompts',
+      },
+      {
+        title: 'Claude is strong with careful, long-form work',
+        body: 'Anthropic’s Claude is popular for thoughtful writing, document analysis, coding, and working through detailed instructions. Claude has desktop apps and a terminal coding tool called Claude Code.',
+        visual: 'judgment',
+      },
+      {
+        title: 'Gemini fits the Google world',
+        body: 'Google’s Gemini connects naturally with Google products and handles text, images, research, and coding. Gemini is available on the web, on mobile, and through the open-source Gemini CLI.',
+        visual: 'growth',
+      },
+      {
+        title: 'Llama can run on your own computer',
+        body: 'Meta’s Llama family is open-weight, which makes it a common choice for local and private experiments. Friendly tools such as Ollama can provide both an app and terminal commands for running compatible Llama models.',
+        visual: 'model',
+      },
+      {
+        title: 'DeepSeek focuses on capable reasoning',
+        body: 'DeepSeek offers chat and reasoning models through its web app and API. It can be a strong value-focused option, but it does not currently provide an official dedicated command-line app.',
+        visual: 'tokens',
+      },
+    ],
+    quiz: {
+      question: 'What is the best way to choose an AI model?',
+      options: [
+        'Always choose the newest name',
+        'Match its strengths and tools to your needs',
+        'Choose only by logo color',
+        'Assume every model has identical features',
+      ],
+      correctIndex: 1,
+      explanation: 'Different models fit different priorities. Your tasks, privacy needs, ecosystem, and preferred interface matter more than hype.',
+    },
+  },
+  {
+    id: 'choose-your-model',
+    title: 'Choose your AI model',
+    shortTitle: 'Model match',
+    description: 'Answer four quick questions, get a recommendation, and make the final choice yourself.',
+    duration: '4 min',
+    difficulty: 'Easy',
+    xp: rewardTiers.Easy.xp,
+    gems: rewardTiers.Easy.gems,
+    color: 'lime',
+    kind: 'chooser',
+    slides: [],
+    quiz: { question: '', options: [], correctIndex: 0, explanation: '' },
+  },
+  {
+    id: 'install-gui',
+    title: 'Install the desktop app',
+    shortTitle: 'Desktop setup',
+    description: 'Install the graphical version of the AI model you chose from a trusted source.',
+    duration: '7 min',
+    difficulty: 'Medium',
+    xp: rewardTiers.Medium.xp,
+    gems: rewardTiers.Medium.gems,
+    color: 'orange',
+    kind: 'install',
+    installMethod: 'gui',
+    slides: [],
+    quiz: { question: '', options: [], correctIndex: 0, explanation: '' },
+  },
+  {
+    id: 'install-cli',
+    title: 'Install the command-line tool',
+    shortTitle: 'CLI setup',
+    description: 'Set up the official terminal workflow for the AI model you chose.',
+    duration: '9 min',
+    difficulty: 'Medium',
+    xp: rewardTiers.Medium.xp,
+    gems: rewardTiers.Medium.gems,
+    color: 'violet',
+    kind: 'install',
+    installMethod: 'cli',
+    slides: [],
+    quiz: { question: '', options: [], correctIndex: 0, explanation: '' },
+  },
+]
+
+export const lessons: LessonContent[] = [...sectionOneLessons, ...sectionTwoLessons]
 
 export function getLesson(id: string) {
   return lessons.find((lesson) => lesson.id === id)

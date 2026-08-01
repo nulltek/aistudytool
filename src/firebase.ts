@@ -22,6 +22,7 @@ import {
 } from 'firebase/firestore'
 import { getFirestore } from 'firebase/firestore'
 import { lessons, type LessonContent } from './lessonData'
+import type { ModelId } from './modelGuide'
 import { levelFromXp, rankFromLevel } from './progression'
 
 const firebaseConfig = {
@@ -48,6 +49,7 @@ export type UserProfile = {
   level: number
   rank: string
   completedCount: number
+  chosenModel?: ModelId
 }
 
 export async function signInWithGoogle() {
@@ -113,11 +115,18 @@ export async function ensureUserProfile(user: User) {
     xp: 0,
     gems: 0,
     level: 1,
-    rank: 'Bronze V',
+    rank: 'Bronze I',
     completedCount: 0,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   })
+}
+
+export async function saveChosenModel(user: User, chosenModel: ModelId) {
+  await setDoc(doc(db, 'users', user.uid), {
+    chosenModel,
+    updatedAt: serverTimestamp(),
+  }, { merge: true })
 }
 
 export function watchAuth(callback: (user: User | null) => void) {

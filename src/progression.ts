@@ -12,7 +12,7 @@ export type RankFamily = {
   ranks: Rank[]
 }
 
-const divisions: Rank['division'][] = ['V', 'IV', 'III', 'II', 'I']
+const divisions: Rank['division'][] = ['I', 'II', 'III', 'IV', 'V']
 
 const minerals = [
   { name: 'Bronze', tone: '#a8673a' },

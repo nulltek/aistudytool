@@ -45,6 +45,7 @@ import {
   completeLesson,
   ensureUserProfile,
   finishRedirectSignIn,
+  saveChosenModel,
   signInWithGoogle,
   signOut,
   watchAuth,
@@ -52,7 +53,8 @@ import {
   watchProfile,
   type UserProfile,
 } from './firebase'
-import { getLesson, lessons, rewardTiers, type LessonContent, type LessonVisual } from './lessonData'
+import { getLesson, lessons, rewardTiers, sectionOneLessons, sectionTwoLessons, type LessonContent, type LessonVisual } from './lessonData'
+import { chooserQuestions, getModelChoice, modelChoices, recommendModel, type InstallMethod, type ModelChoice, type ModelId } from './modelGuide'
 import { progressFromXp, rankFamilies, rankFromLevel } from './progression'
 
 gsap.registerPlugin(ScrollTrigger, useGSAP)
@@ -259,20 +261,20 @@ function BottomNav({ route }: { route: string }) {
   )
 }
 
-const lessonIcons = [BrainCircuit, History, Bot]
-const lessonSides = ['center', 'right', 'left'] as const
+const lessonIcons = [BrainCircuit, History, Bot, Layers3, Target, ImageIcon, Code2]
+const lessonSides = ['center', 'right', 'left', 'center', 'left', 'right', 'center'] as const
 
-function Checkpoint({ lesson, index, completed, unlocked }: { lesson: LessonContent; index: number; completed: boolean; unlocked: boolean }) {
+function Checkpoint({ lesson, index, completed, unlocked, unavailable = false, detail }: { lesson: LessonContent; index: number; completed: boolean; unlocked: boolean; unavailable?: boolean; detail?: string }) {
   const Icon = lessonIcons[index]
-  const state = completed ? 'complete' : unlocked ? 'active' : 'locked'
+  const state = unavailable ? 'skipped' : completed ? 'complete' : unlocked ? 'active' : 'locked'
   return (
     <div className={`checkpoint-row ${lessonSides[index]}`}>
-      <button className={`checkpoint ${state} ${lesson.color}`} disabled={!unlocked} onClick={() => goTo(`/lesson/${lesson.id}`)} aria-label={`${lesson.title}, ${state}`}>
-        <span className="checkpoint-ring"><span className="checkpoint-face">{completed ? <Check size={29} strokeWidth={3.2} /> : unlocked ? <Icon size={27} /> : <LockKeyhole size={25} />}</span></span>
-        {!completed && unlocked && <span className="start-flag">START</span>}
+      <button className={`checkpoint ${state} ${lesson.color}`} disabled={!unlocked || unavailable} onClick={() => goTo(`/lesson/${lesson.id}`)} aria-label={`${lesson.title}, ${state}`}>
+        <span className="checkpoint-ring"><span className="checkpoint-face">{unavailable ? <Check size={27} /> : completed ? <Check size={29} strokeWidth={3.2} /> : unlocked ? <Icon size={27} /> : <LockKeyhole size={25} />}</span></span>
+        {!completed && unlocked && !unavailable && <span className="start-flag">START</span>}
       </button>
-      <div className={`lesson-label ${unlocked && !completed ? 'show' : ''}`}>
-        <span>{lesson.difficulty} · {lesson.xp} XP · {lesson.gems} gems</span><strong>{lesson.shortTitle}</strong><small>{lesson.duration}</small>
+      <div className={`lesson-label ${(unlocked && !completed) || unavailable ? 'show' : ''}`}>
+        <span>{unavailable ? 'Unavailable · reward granted' : `${lesson.difficulty} · ${lesson.xp} XP · ${lesson.gems} gems`}</span><strong>{detail ?? lesson.shortTitle}</strong><small>{lesson.duration}</small>
       </div>
     </div>
   )
@@ -282,6 +284,8 @@ function Dashboard({ user, profile, completions, route }: { user: User; profile:
   const root = useRef<HTMLDivElement>(null)
   const progress = (completions.length / lessons.length) * 100
   const level = progressFromXp(profile.xp)
+  const basicsDone = sectionOneLessons.every((lesson) => completions.includes(lesson.id))
+  const chosenModel = getModelChoice(profile.chosenModel)
 
   useGSAP(() => {
     gsap.from('.course-hero', { y: 24, opacity: 0, duration: 0.75, ease: 'power3.out' })
@@ -303,7 +307,7 @@ function Dashboard({ user, profile, completions, route }: { user: User; profile:
                 <h1>Understand AI.<br />Start with the basics.</h1>
                 <p>Meet artificial intelligence, explore where it came from, and learn how models like LLMs work.</p>
                 <div className="hero-progress">
-                  <div className="progress-copy"><span>Section progress</span><strong>{completions.length} of {lessons.length} lessons</strong></div>
+                <div className="progress-copy"><span>Course progress</span><strong>{completions.length} of {lessons.length} lessons</strong></div>
                   <div className="progress-track"><span style={{ width: `${Math.max(4, progress)}%` }} /></div>
                 </div>
               </div>
@@ -322,14 +326,33 @@ function Dashboard({ user, profile, completions, route }: { user: User; profile:
               <div className="trail-wrap">
                 <svg className="trail-line" viewBox="0 0 400 560" preserveAspectRatio="none" aria-hidden="true"><path d="M200 62 C200 130 292 142 292 270 S108 374 108 500" /></svg>
                 <div className="lesson-list">
-                  {lessons.map((lesson, index) => {
+                  {sectionOneLessons.map((lesson, index) => {
                     const completed = completions.includes(lesson.id)
-                    const unlocked = index === 0 || completions.includes(lessons[index - 1].id) || completed
+                    const unlocked = index === 0 || completions.includes(sectionOneLessons[index - 1].id) || completed
                     return <Checkpoint key={lesson.id} lesson={lesson} index={index} completed={completed} unlocked={unlocked} />
                   })}
                 </div>
               </div>
-              <div className="section-gate"><div className="gate-line" /><div className="gate-card"><span className="gate-icon"><LockKeyhole size={22} /></span><div><span>Next up</span><strong>Choosing and installing AI models</strong></div><div className="gate-progress">{completions.length} / 3</div></div><div className="gate-line" /></div>
+              <div className={`section-gate ${basicsDone ? 'open' : ''}`}><div className="gate-line" /><div className="gate-card"><span className="gate-icon">{basicsDone ? <Sparkles size={22} /> : <LockKeyhole size={22} />}</span><div><span>{basicsDone ? 'Section unlocked' : 'Complete AI basics'}</span><strong>Choose your AI toolkit</strong></div><div className="gate-progress">{sectionOneLessons.filter((lesson) => completions.includes(lesson.id)).length} / 3</div></div><div className="gate-line" /></div>
+              <div className={`second-section ${basicsDone ? '' : 'section-locked'}`}>
+                <div className="path-heading"><div><p>Section two</p><h2>Choose your AI toolkit</h2></div><span className="section-count">4 lessons · 28 min</span></div>
+                <p className="section-intro">Meet the leading choices, find your best fit, then follow setup lessons shaped around your decision.</p>
+                <div className="trail-wrap second-trail">
+                  <svg className="trail-line" viewBox="0 0 400 760" preserveAspectRatio="none" aria-hidden="true"><path d="M200 62 C200 130 104 176 112 274 S298 376 288 480 S190 610 200 704" /></svg>
+                  <div className="lesson-list">
+                    {sectionTwoLessons.map((lesson, localIndex) => {
+                      const index = localIndex + sectionOneLessons.length
+                      const completed = completions.includes(lesson.id)
+                      const previous = localIndex === 0 ? null : sectionTwoLessons[localIndex - 1]
+                      const unlocked = basicsDone && (localIndex === 0 || !!previous && completions.includes(previous.id) || completed)
+                      const method = lesson.installMethod
+                      const unavailable = !!(method && chosenModel && !chosenModel[method].available && completed)
+                      const detail = method && chosenModel ? `${method === 'gui' ? 'Desktop' : 'CLI'}: ${chosenModel.name}` : undefined
+                      return <Checkpoint key={lesson.id} lesson={lesson} index={index} completed={completed} unlocked={unlocked} unavailable={unavailable} detail={detail} />
+                    })}
+                  </div>
+                </div>
+              </div>
             </section>
           </main>
           <aside className="right-rail">
@@ -342,7 +365,7 @@ function Dashboard({ user, profile, completions, route }: { user: User; profile:
               <div className="tip-visual"><AiMascot small /><Sparkles size={19} /></div>
               <p>Today’s field note</p><h3>AI finds patterns.</h3>
               <span>It can produce impressive results without thinking or understanding exactly like a person.</span>
-              <button onClick={() => goTo(`/lesson/${lessons[0].id}`)}>Start learning <ArrowRight size={16} /></button>
+              <button onClick={() => goTo(`/lesson/${sectionOneLessons[0].id}`)}>Start learning <ArrowRight size={16} /></button>
             </div>
             <div className="marquee" aria-label="Course topics"><div className="marquee-track"><span>Basics</span><i /><span>History</span><i /><span>Models</span><i /><span>Prompts</span><i /><span>Basics</span><i /><span>History</span></div></div>
           </aside>
@@ -367,6 +390,103 @@ function LessonIllustration({ visual }: { visual: LessonVisual }) {
 }
 
 type RewardResult = { alreadyCompleted: boolean; oldLevel: number; newLevel: number }
+
+function makeInstallLesson(base: LessonContent, model: ModelChoice, method: InstallMethod): LessonContent {
+  const guide = model[method]
+  const methodName = method === 'gui' ? 'desktop app' : 'command-line tool'
+  const visuals: LessonVisual[] = method === 'gui' ? ['model', 'examples', 'judgment'] : ['tokens', 'prompts', 'judgment']
+  return {
+    ...base,
+    title: `Install ${model.name}'s ${methodName}`,
+    shortTitle: `${method === 'gui' ? 'Desktop' : 'CLI'}: ${model.name}`,
+    description: `A safe, guided setup for ${guide.label}.`,
+    sourceUrl: guide.sourceUrl,
+    slides: guide.steps.map((step, index) => ({ ...step, visual: visuals[index % visuals.length] })),
+    quiz: {
+      question: `Where should you get ${guide.label}?`,
+      options: ['Its official website or documentation', 'A random download mirror', 'An email attachment from a stranger', 'A cracked software bundle'],
+      correctIndex: 0,
+      explanation: `Use the official ${model.provider} or tool website. This reduces the risk of fake or modified installers.`,
+    },
+  }
+}
+
+function ModelChooserPage({ user, completed }: { user: User; completed: boolean }) {
+  const root = useRef<HTMLElement>(null)
+  const [answers, setAnswers] = useState<Record<string, number>>({})
+  const [recommended, setRecommended] = useState<ModelChoice | null>(null)
+  const [selected, setSelected] = useState<ModelId | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const answered = Object.keys(answers).length
+
+  useGSAP(() => {
+    gsap.from('.chooser-word', { yPercent: 110, opacity: 0, stagger: .07, duration: .75, ease: 'power3.out' })
+    gsap.from('.question-card', { y: 35, opacity: 0, stagger: .1, duration: .65, ease: 'back.out(1.3)' })
+  }, { scope: root })
+
+  const revealMatch = () => {
+    const match = recommendModel(answers)
+    setRecommended(match)
+    setSelected(match.id)
+    requestAnimationFrame(() => document.querySelector('.model-result')?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+  }
+
+  const confirmChoice = async () => {
+    if (!selected) return
+    setSaving(true)
+    setError('')
+    try {
+      const choice = getModelChoice(selected)!
+      const chooserLesson = getLesson('choose-your-model')!
+      await saveChosenModel(user, selected)
+      await completeLesson(user, chooserLesson)
+      for (const method of ['gui', 'cli'] as const) {
+        if (!choice[method].available) await completeLesson(user, getLesson(`install-${method}`)!)
+      }
+      goTo('/')
+    } catch (reason) {
+      setError((reason as Error).message || 'Your choice could not be saved.')
+      setSaving(false)
+    }
+  }
+
+  return (
+    <main className="chooser-page" ref={root}>
+      <header className="lesson-route-top">
+        <button className="lesson-exit" onClick={() => goTo('/')} aria-label="Quit lesson"><X size={22} /></button>
+        <div className="lesson-route-progress"><span style={{ width: `${Math.max(5, (answered / chooserQuestions.length) * 100)}%` }} /></div>
+        <div className="lesson-route-reward"><Target size={16} /> Personal match <Zap size={16} /> {getLesson('choose-your-model')!.xp} XP</div>
+      </header>
+      <section className="chooser-intro">
+        <div className="chooser-heading"><p className="course-kicker">Model match</p><h1><span className="chooser-word">Your work.</span><span className="chooser-word">Your rules.</span><span className="chooser-word accent">Your AI.</span></h1><p>Four quick choices create a starting recommendation. You make the final call.</p></div>
+        <div className="chooser-mascot"><span className="match-badge">{answered}/4 answered</span><AiMascot /></div>
+      </section>
+      <section className="question-board" aria-label="AI model matching questions">
+        {chooserQuestions.map((question, questionIndex) => (
+          <article className="question-card" key={question.id}>
+            <span className="question-number">0{questionIndex + 1}</span>
+            <h2>{question.title}</h2>
+            <div className="question-options">
+              {question.options.map((option, optionIndex) => <button className={answers[question.id] === optionIndex ? 'selected' : ''} onClick={() => setAnswers((current) => ({ ...current, [question.id]: optionIndex }))} key={option.label}><span>{String.fromCharCode(65 + optionIndex)}</span>{option.label}{answers[question.id] === optionIndex && <Check size={17} />}</button>)}
+            </div>
+          </article>
+        ))}
+      </section>
+      {!recommended && <div className="match-action"><button className="continue-button" disabled={answered !== chooserQuestions.length} onClick={revealMatch}>Find my model <Sparkles size={19} /></button><small>Recommendation only. You can override it next.</small></div>}
+      {recommended && <section className="model-result">
+        <div className="result-copy"><p className="course-kicker">Your recommended starting point</p><h2>{recommended.name}</h2><p>{recommended.short}</p><div className="best-for">{recommended.bestFor.map((item) => <span key={item}>{item}</span>)}</div><small>{recommended.caution}</small></div>
+        <div className="model-picker"><p>Want a different one? Choose any model.</p><div className="model-accordion">{modelChoices.map((model) => <button className={selected === model.id ? 'selected' : ''} style={{ '--model-tone': model.tone } as CSSProperties} onClick={() => setSelected(model.id)} key={model.id}><span>{model.provider}</span><strong>{model.name}</strong><small>{model.bestFor[0]}</small>{selected === model.id && <Check size={20} />}</button>)}</div></div>
+        {error && <div className="auth-error" role="alert">{error}</div>}
+        <button className="continue-button confirm-model" onClick={confirmChoice} disabled={saving}>{saving ? <LoaderCircle className="loading-spinner" size={19} /> : completed ? 'Keep this choice' : 'Choose this model'} {!saving && <ArrowRight size={19} />}</button>
+      </section>}
+    </main>
+  )
+}
+
+function UnavailableLessonPage({ model, method }: { model: ModelChoice; method: InstallMethod }) {
+  return <main className="unavailable-page"><button className="lesson-exit" onClick={() => goTo('/')}><X size={22} /></button><div className="unavailable-icon"><Check size={42} /></div><p className="course-kicker">Checkpoint skipped safely</p><h1>No official {method === 'gui' ? 'desktop app' : 'CLI'} for {model.name}.</h1><p>This checkpoint is greyed out and its XP and gems were granted automatically. You do not need to install an unofficial substitute.</p><button className="continue-button" onClick={() => goTo('/')}>Back to the trail <ArrowRight size={19} /></button></main>
+}
 
 function LessonPage({ user, profile, lesson, completed }: { user: User; profile: UserProfile; lesson: LessonContent; completed: boolean }) {
   const [step, setStep] = useState(0)
@@ -431,6 +551,7 @@ function LessonPage({ user, profile, lesson, completed }: { user: User; profile:
           <div className="lesson-reading">
             <div className="lesson-count">{step + 1} / {lesson.slides.length}</div>
             <h1>{slide.title}</h1><p>{slide.body}</p>
+            {step === 0 && lesson.sourceUrl && <a className="official-source" href={lesson.sourceUrl} target="_blank" rel="noreferrer"><ShieldCheck size={18} /> Open official setup source <ArrowRight size={17} /></a>}
             <div className="lesson-actions">
               <button className="back-button" onClick={() => setStep((value) => value - 1)} disabled={step === 0} aria-label="Previous lesson card"><ArrowLeft size={19} /></button>
               <button className="continue-button" onClick={() => setStep((value) => value + 1)}>Continue <ArrowRight size={19} /></button>
@@ -546,6 +667,16 @@ export default function App() {
 
   if (route.startsWith('/lesson/')) {
     const lesson = getLesson(route.replace('/lesson/', ''))
+    if (lesson?.kind === 'chooser') return <ModelChooserPage user={user} completed={completions.includes(lesson.id)} />
+    if (lesson?.kind === 'install' && lesson.installMethod) {
+      const model = getModelChoice(profile.chosenModel)
+      if (!model) {
+        goTo('/lesson/choose-your-model')
+        return <LoadingScreen />
+      }
+      if (!model[lesson.installMethod].available) return <UnavailableLessonPage model={model} method={lesson.installMethod} />
+      return <LessonPage user={user} profile={profile} lesson={makeInstallLesson(lesson, model, lesson.installMethod)} completed={completions.includes(lesson.id)} />
+    }
     if (lesson) return <LessonPage user={user} profile={profile} lesson={lesson} completed={completions.includes(lesson.id)} />
   }
 
