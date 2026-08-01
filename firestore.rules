@@ -13,7 +13,10 @@ service cloud.firestore {
     function isMediumLesson(lessonId) {
       return lessonId in [
         'llms-and-models', 'popular-llms', 'install-gui', 'install-cli',
-        'prompt-anatomy', 'context-constraints', 'examples-iteration', 'verify-ai-output'
+        'prompt-anatomy', 'context-constraints', 'examples-iteration', 'verify-ai-output',
+        'skills-understand', 'skills-create', 'skills-review',
+        'instructions-understand', 'instructions-write', 'instructions-scope',
+        'extensions-understand', 'extensions-connect', 'extensions-safety'
       ] || lessonId.matches('^(coding|research|automation)-[a-z-]+-[1-4]$');
     }
 

@@ -23,7 +23,7 @@ export type LessonContent = {
   xp: number
   gems: number
   color: 'lime' | 'orange' | 'violet'
-  kind?: 'standard' | 'chooser' | 'install'
+  kind?: 'standard' | 'chooser' | 'install' | 'adaptive-usage'
   installMethod?: 'gui' | 'cli'
   sourceUrl?: string
   slides: LessonSlide[]
@@ -340,6 +340,73 @@ export const promptLessons: LessonContent[] = [
   },
 ]
 
+type AdaptiveUsageLessonSeed = {
+  id: string
+  title: string
+  shortTitle: string
+  description: string
+  duration: string
+  color: LessonContent['color']
+}
+
+export type AdaptiveUsageGroup = {
+  id: 'skills' | 'instructions' | 'extensions'
+  eyebrow: string
+  title: string
+  description: string
+  lessons: LessonContent[]
+}
+
+function createAdaptiveUsageLesson(seed: AdaptiveUsageLessonSeed): LessonContent {
+  return {
+    ...seed,
+    difficulty: 'Medium',
+    xp: rewardTiers.Medium.xp,
+    gems: rewardTiers.Medium.gems,
+    kind: 'adaptive-usage',
+    slides: [],
+    quiz: { question: '', options: [], correctIndex: 0, explanation: '' },
+  }
+}
+
+export const adaptiveUsageGroups: AdaptiveUsageGroup[] = [
+  {
+    id: 'skills',
+    eyebrow: 'Reusable capability',
+    title: 'Build with skills',
+    description: 'Learn how your chosen AI stores, loads, and safely reuses specialist instructions.',
+    lessons: [
+      createAdaptiveUsageLesson({ id: 'skills-understand', title: 'Understand skills', shortTitle: 'What skills are', description: 'See what a reusable skill means for your selected AI and where it lives.', duration: '7 min', color: 'violet' }),
+      createAdaptiveUsageLesson({ id: 'skills-create', title: 'Create a useful skill', shortTitle: 'Create a skill', description: 'Turn one repeated workflow into clear, focused instructions for your selected AI.', duration: '9 min', color: 'lime' }),
+      createAdaptiveUsageLesson({ id: 'skills-review', title: 'Review skills safely', shortTitle: 'Review a skill', description: 'Inspect instructions, scripts, and permissions before trusting a reusable capability.', duration: '8 min', color: 'orange' }),
+    ],
+  },
+  {
+    id: 'instructions',
+    eyebrow: 'Project memory',
+    title: 'Guide every project',
+    description: 'Use the instruction-file convention supported by your selected AI, including its real filename and scope rules.',
+    lessons: [
+      createAdaptiveUsageLesson({ id: 'instructions-understand', title: 'Meet the project guide', shortTitle: 'Project guide', description: 'Learn which project instruction file your selected AI actually reads.', duration: '7 min', color: 'orange' }),
+      createAdaptiveUsageLesson({ id: 'instructions-write', title: 'Write clear project rules', shortTitle: 'Write the rules', description: 'Give your selected AI compact commands, checks, and boundaries it can follow.', duration: '9 min', color: 'violet' }),
+      createAdaptiveUsageLesson({ id: 'instructions-scope', title: 'Control instruction scope', shortTitle: 'Scope the rules', description: 'Understand precedence, nested folders, and how to verify which instructions apply.', duration: '8 min', color: 'lime' }),
+    ],
+  },
+  {
+    id: 'extensions',
+    eyebrow: 'Connected tools',
+    title: 'Extend the workspace',
+    description: 'Connect trusted tools using the extension, plugin, MCP, or tool-calling system your selected AI supports.',
+    lessons: [
+      createAdaptiveUsageLesson({ id: 'extensions-understand', title: 'Understand extensions', shortTitle: 'Extension basics', description: 'See the real integration system available for your selected AI.', duration: '7 min', color: 'lime' }),
+      createAdaptiveUsageLesson({ id: 'extensions-connect', title: 'Connect one useful tool', shortTitle: 'Connect a tool', description: 'Add one narrow integration and test it with a harmless task.', duration: '9 min', color: 'orange' }),
+      createAdaptiveUsageLesson({ id: 'extensions-safety', title: 'Use extensions safely', shortTitle: 'Extension safety', description: 'Audit source, permissions, data access, and actions before giving an AI more reach.', duration: '8 min', color: 'violet' }),
+    ],
+  },
+]
+
+export const adaptiveUsageLessons = adaptiveUsageGroups.flatMap((group) => group.lessons)
+
 export type FocusTrack = 'coding' | 'research' | 'automation'
 
 type TrackLessonSeed = { title: string; goal: string }
@@ -452,7 +519,7 @@ export const trackSections: Record<FocusTrack, TrackSection[]> = Object.fromEntr
 ) as Record<FocusTrack, TrackSection[]>
 
 export const trackLessons = Object.values(trackSections).flatMap((sections) => sections.flatMap((section) => section.lessons))
-export const coreLessons = [...sectionOneLessons, ...sectionTwoLessons, ...promptLessons]
+export const coreLessons = [...sectionOneLessons, ...sectionTwoLessons, ...promptLessons, ...adaptiveUsageLessons]
 export const lessons: LessonContent[] = [...coreLessons, ...trackLessons]
 
 export function getLesson(id: string) {

@@ -56,9 +56,10 @@ import {
   watchProfile,
   type UserProfile,
 } from './firebase'
-import { getLesson, lessons, promptLessons, rewardTiers, sectionOneLessons, sectionTwoLessons, trackSections, type FocusTrack, type LessonContent, type LessonVisual } from './lessonData'
+import { adaptiveUsageGroups, adaptiveUsageLessons, getLesson, lessons, promptLessons, rewardTiers, sectionOneLessons, sectionTwoLessons, trackSections, type FocusTrack, type LessonContent, type LessonVisual } from './lessonData'
 import { chooserQuestions, getModelChoice, modelChoices, recommendModel, type InstallMethod, type ModelChoice, type ModelId } from './modelGuide'
 import { progressFromXp, rankFamilies, rankFromLevel } from './progression'
+import { makeAdaptiveUsageLesson } from './adaptiveUsage'
 
 gsap.registerPlugin(ScrollTrigger, useGSAP)
 
@@ -306,9 +307,10 @@ function Dashboard({ user, profile, completions, route }: { user: User; profile:
   const basicsDone = sectionOneLessons.every((lesson) => completions.includes(lesson.id))
   const modelSectionDone = sectionTwoLessons.every((lesson) => completions.includes(lesson.id))
   const promptsDone = promptLessons.every((lesson) => completions.includes(lesson.id))
+  const usageDone = adaptiveUsageLessons.every((lesson) => completions.includes(lesson.id)) && promptsDone
   const chosenModel = getModelChoice(profile.chosenModel)
   const focusSections = focusTrack ? trackSections[focusTrack] : []
-  const visibleLessons = [...sectionOneLessons, ...sectionTwoLessons, ...promptLessons, ...focusSections.flatMap((section) => section.lessons)]
+  const visibleLessons = [...sectionOneLessons, ...sectionTwoLessons, ...promptLessons, ...adaptiveUsageLessons, ...focusSections.flatMap((section) => section.lessons)]
   const visibleCompleted = visibleLessons.filter((lesson) => completions.includes(lesson.id)).length
   const progress = (visibleCompleted / visibleLessons.length) * 100
 
@@ -331,6 +333,9 @@ function Dashboard({ user, profile, completions, route }: { user: User; profile:
     gsap.from('.checkpoint-row', { y: 35, opacity: 0, stagger: 0.12, duration: 0.65, ease: 'back.out(1.5)', scrollTrigger: { trigger: '.trail-wrap', start: 'top 80%' } })
     gsap.to('.checkpoint.active .checkpoint-ring', { y: -6, repeat: -1, yoyo: true, duration: 0.82, ease: 'sine.inOut' })
     gsap.to('.hero-art', { y: 45, opacity: 0.25, ease: 'none', scrollTrigger: { trigger: '.course-hero', start: 'top top+=80', end: 'bottom top', scrub: 1 } })
+    gsap.utils.toArray<HTMLElement>('.adaptive-usage-group').forEach((group, index) => {
+      gsap.from(group, { y: 55, rotate: index % 2 ? 1.2 : -1.2, opacity: .25, ease: 'none', scrollTrigger: { trigger: group, start: 'top 92%', end: 'top 62%', scrub: .7 } })
+    })
     gsap.utils.toArray<HTMLElement>('.track-section-card').forEach((card) => {
       gsap.from(card, { y: 70, scale: .96, opacity: .25, ease: 'none', scrollTrigger: { trigger: card, start: 'top 92%', end: 'top 56%', scrub: .7 } })
     })
@@ -410,17 +415,51 @@ function Dashboard({ user, profile, completions, route }: { user: User; profile:
                     })}
                   </div>
                 </div>
+
+                <div className={`adaptive-usage-lab ${promptsDone ? 'ready' : 'section-locked'}`}>
+                  <div className="adaptive-usage-intro">
+                    <div><p>Chosen toolkit</p><h2>{chosenModel?.name ?? 'Your AI'} workspace skills</h2></div>
+                    <span>9 adaptive lessons</span>
+                    <p>These checkpoints use the real skill, project-instruction, and extension conventions for {chosenModel?.name ?? 'the AI you choose'}.</p>
+                  </div>
+                  <div className="adaptive-usage-stack">
+                    {adaptiveUsageGroups.map((group, groupIndex) => {
+                      const previousGroup = groupIndex === 0 ? null : adaptiveUsageGroups[groupIndex - 1]
+                      const groupUnlocked = promptsDone && (groupIndex === 0 || !!previousGroup && previousGroup.lessons.every((lesson) => completions.includes(lesson.id)))
+                      const groupCompleted = group.lessons.every((lesson) => completions.includes(lesson.id))
+                      return <article className={`adaptive-usage-group ${groupUnlocked ? '' : 'section-locked'}`} key={group.id}>
+                        <div className="adaptive-group-heading">
+                          <div><p>{groupCompleted ? 'Trail complete' : groupUnlocked ? group.eyebrow : 'Finish the trail above'}</p><h3>{group.title}</h3><span>{group.description}</span></div>
+                          <strong>{group.lessons.filter((lesson) => completions.includes(lesson.id)).length}/3</strong>
+                        </div>
+                        <div className="trail-wrap adaptive-trail">
+                          <svg className="trail-line" viewBox="0 0 400 560" preserveAspectRatio="none" aria-hidden="true"><path d="M200 62 C200 130 292 142 292 270 S108 374 108 500" /></svg>
+                          <div className="lesson-list">
+                            {group.lessons.map((lesson, localIndex) => {
+                              const completed = completions.includes(lesson.id)
+                              const previous = localIndex === 0 ? null : group.lessons[localIndex - 1]
+                              const unlocked = groupUnlocked && (localIndex === 0 || !!previous && completions.includes(previous.id) || completed)
+                              const adaptiveLesson = chosenModel ? makeAdaptiveUsageLesson(lesson, chosenModel) : lesson
+                              const iconIndex = sectionOneLessons.length + sectionTwoLessons.length + promptLessons.length + groupIndex * 3 + localIndex
+                              return <Checkpoint key={lesson.id} lesson={adaptiveLesson} index={iconIndex} completed={completed} unlocked={unlocked} />
+                            })}
+                          </div>
+                        </div>
+                      </article>
+                    })}
+                  </div>
+                </div>
               </div>
 
-              <div className={`focus-choice ${promptsDone ? 'ready' : 'locked'}`}>
+              <div className={`focus-choice ${usageDone ? 'ready' : 'locked'}`}>
                 <div className="focus-choice-copy"><p className="course-kicker">Shape the trail around your goal</p><h2>What will you use AI for?</h2><p>Pick a direction to reveal four complete sections. You can switch paths whenever your goal changes.</p></div>
                 <nav className="track-navbar" aria-label="Choose an AI learning focus">
-                  {focusOptions.map(({ id, label, icon: Icon, copy }) => <button className={focusTrack === id ? 'active' : ''} key={id} disabled={!promptsDone || savingTrack} onClick={() => chooseFocusTrack(id)}><Icon size={24} /><span><strong>{label}</strong><small>{copy}</small></span>{focusTrack === id && <Check size={20} />}</button>)}
+                  {focusOptions.map(({ id, label, icon: Icon, copy }) => <button className={focusTrack === id ? 'active' : ''} key={id} disabled={!usageDone || savingTrack} onClick={() => chooseFocusTrack(id)}><Icon size={24} /><span><strong>{label}</strong><small>{copy}</small></span>{focusTrack === id && <Check size={20} />}</button>)}
                 </nav>
-                {!promptsDone && <div className="focus-lock"><LockKeyhole size={18} /> Complete all five prompting lessons to choose a specialist path.</div>}
+                {!usageDone && <div className="focus-lock"><LockKeyhole size={18} /> Complete all fourteen AI usage lessons to choose a specialist path.</div>}
               </div>
 
-              {promptsDone && focusTrack && <div className="track-paths" key={focusTrack}>
+              {usageDone && focusTrack && <div className="track-paths" key={focusTrack}>
                 <div className="track-path-intro"><div><p>{focusOptions.find((option) => option.id === focusTrack)?.label} path</p><h2>Four chapters. One practical skill stack.</h2></div><div className="track-marquee"><div><span>Learn</span><i /><span>Practice</span><i /><span>Review</span><i /><span>Ship</span><i /><span>Learn</span><i /><span>Practice</span></div></div></div>
                 {focusSections.map((section, sectionIndex) => {
                   const previousSection = sectionIndex === 0 ? null : focusSections[sectionIndex - 1]
@@ -640,7 +679,7 @@ function LessonPage({ user, profile, lesson, completed }: { user: User; profile:
           <div className="lesson-reading">
             <div className="lesson-count">{step + 1} / {lesson.slides.length}</div>
             <h1>{slide.title}</h1><p>{slide.body}</p>
-            {step === 0 && lesson.sourceUrl && <a className="official-source" href={lesson.sourceUrl} target="_blank" rel="noreferrer"><ShieldCheck size={18} /> Open official setup source <ArrowRight size={17} /></a>}
+            {step === 0 && lesson.sourceUrl && <a className="official-source" href={lesson.sourceUrl} target="_blank" rel="noreferrer"><ShieldCheck size={18} /> Open official source <ArrowRight size={17} /></a>}
             <div className="lesson-actions">
               <button className="back-button" onClick={() => setStep((value) => value - 1)} disabled={step === 0} aria-label="Previous lesson card"><ArrowLeft size={19} /></button>
               <button className="continue-button" onClick={() => setStep((value) => value + 1)}>Continue <ArrowRight size={19} /></button>
@@ -765,6 +804,14 @@ export default function App() {
       }
       if (!model[lesson.installMethod].available) return <UnavailableLessonPage model={model} method={lesson.installMethod} />
       return <LessonPage user={user} profile={profile} lesson={makeInstallLesson(lesson, model, lesson.installMethod)} completed={completions.includes(lesson.id)} />
+    }
+    if (lesson?.kind === 'adaptive-usage') {
+      const model = getModelChoice(profile.chosenModel)
+      if (!model) {
+        goTo('/lesson/choose-your-model')
+        return <LoadingScreen />
+      }
+      return <LessonPage user={user} profile={profile} lesson={makeAdaptiveUsageLesson(lesson, model)} completed={completions.includes(lesson.id)} />
     }
     if (lesson) return <LessonPage user={user} profile={profile} lesson={lesson} completed={completions.includes(lesson.id)} />
   }
