@@ -1,0 +1,11 @@
+[projectmap]
+.* = model-trail
+
+[settings]
+exclude =
+    node_modules/
+    dist/
+    .git/
+    .agents/
+    outputs/
+    work/

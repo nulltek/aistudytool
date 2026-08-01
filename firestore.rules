@@ -1,0 +1,91 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function owns(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
+
+    function hasCompleted(uid, lessonId) {
+      return existsAfter(/databases/$(database)/documents/users/$(uid)/completedLessons/$(lessonId));
+    }
+
+    function expectedXp(uid) {
+      return (hasCompleted(uid, 'what-is-ai') ? 50 : 0)
+        + (hasCompleted(uid, 'ai-history') ? 50 : 0)
+        + (hasCompleted(uid, 'llms-and-models') ? 75 : 0);
+    }
+
+    function expectedGems(uid) {
+      return (hasCompleted(uid, 'what-is-ai') ? 10 : 0)
+        + (hasCompleted(uid, 'ai-history') ? 10 : 0)
+        + (hasCompleted(uid, 'llms-and-models') ? 15 : 0);
+    }
+
+    function expectedCompletedCount(uid) {
+      return (hasCompleted(uid, 'what-is-ai') ? 1 : 0)
+        + (hasCompleted(uid, 'ai-history') ? 1 : 0)
+        + (hasCompleted(uid, 'llms-and-models') ? 1 : 0);
+    }
+
+    function expectedLevel(uid) {
+      return expectedXp(uid) >= 100 ? 2 : 1;
+    }
+
+    function expectedRank(uid) {
+      return expectedLevel(uid) >= 2 ? 'Bronze IV' : 'Bronze V';
+    }
+
+    function validCompletion(lessonId, data) {
+      return data.keys().hasOnly(['lessonId', 'xp', 'gems', 'quizScore', 'completedAt'])
+        && data.lessonId == lessonId
+        && data.quizScore == 1
+        && data.completedAt == request.time
+        && (
+          (lessonId == 'what-is-ai' && data.xp == 50 && data.gems == 10)
+          || (lessonId == 'ai-history' && data.xp == 50 && data.gems == 10)
+          || (lessonId == 'llms-and-models' && data.xp == 75 && data.gems == 15)
+        );
+    }
+
+    match /users/{uid} {
+      allow read: if owns(uid);
+
+      allow create: if owns(uid)
+        && request.resource.data.keys().hasOnly([
+          'displayName', 'email', 'photoURL', 'xp', 'gems', 'level', 'rank',
+          'completedCount', 'createdAt', 'updatedAt'
+        ])
+        && request.resource.data.xp == 0
+        && request.resource.data.gems == 0
+        && request.resource.data.level == 1
+        && request.resource.data.rank == 'Bronze V'
+        && request.resource.data.completedCount == 0
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+
+      allow update: if owns(uid)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'displayName', 'photoURL', 'xp', 'gems', 'level', 'rank',
+          'completedCount', 'updatedAt'
+        ])
+        && request.resource.data.email == resource.data.email
+        && request.resource.data.xp == expectedXp(uid)
+        && request.resource.data.gems == expectedGems(uid)
+        && request.resource.data.completedCount == expectedCompletedCount(uid)
+        && request.resource.data.level == expectedLevel(uid)
+        && request.resource.data.rank == expectedRank(uid)
+        && request.resource.data.updatedAt == request.time;
+
+      allow delete: if false;
+
+      match /completedLessons/{lessonId} {
+        allow read: if owns(uid);
+        allow create: if owns(uid)
+          && !exists(/databases/$(database)/documents/users/$(uid)/completedLessons/$(lessonId))
+          && validCompletion(lessonId, request.resource.data);
+        allow update, delete: if false;
+      }
+    }
+  }
+}
