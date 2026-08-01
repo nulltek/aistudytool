@@ -133,10 +133,10 @@ The Practice page supports two modes.
 ### Focused section practice
 
 - Every visible section has a deterministic bank of exactly 100 distinct questions.
-- Question banks are built from the real lesson slides, concepts, titles, and end-of-lesson quizzes.
+- Question banks are built from real lesson definitions, goals, relationships, application plans, diagnoses, multi-concept scenarios, and end-of-lesson quizzes.
 - Every eligible lesson in the section is represented in its bank.
-- A section becomes available for practice after the learner completes at least one lesson in it.
-- Questions are drawn only from lessons that learner has completed.
+- Focused practice unlocks after the learner completes the entire section.
+- Semantic concept keys prevent a single fact from being padded into many superficially rephrased questions.
 
 ### General revision
 
@@ -481,10 +481,11 @@ Coding, research, and automation section seeds live in `src/lessonData.ts`. Each
 `src/practiceData.ts` creates section banks from the actual lesson material. The generator must continue to satisfy these invariants:
 
 - Exactly 100 questions per section bank.
-- 100 distinct question prompts per full bank.
+- 100 distinct prompts and semantic concept keys per full bank.
 - Coverage for every eligible lesson in the section.
 - Five unique questions per practice session.
-- Completed-lesson filtering before a learner begins practice.
+- Full-section completion before focused practice unlocks.
+- Completed-lesson filtering for general revision.
 
 After changing lesson content, run the normal lint and build commands and verify representative practice banks.
 

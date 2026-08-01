@@ -967,8 +967,7 @@ function PracticePage({ user, profile, completions, route }: { user: User; profi
   }
 
   const startSection = (section: PracticeSection) => {
-    const completedLessons = section.lessons.filter((lesson) => completedSet.has(lesson.id))
-    startWithBank(section.title, buildQuestionBank({ ...section, lessons: completedLessons }))
+    startWithBank(section.title, buildQuestionBank(section))
   }
 
   const startGeneral = () => {
@@ -1015,7 +1014,7 @@ function PracticePage({ user, profile, completions, route }: { user: User; profi
       <section className="practice-question-shell" key={question.id}>
         <div className="practice-question-art"><Shuffle size={72} /><span>{session.title}</span><i /><i /></div>
         <div className="practice-question-copy">
-          <p>Choose the best answer</p>
+          <p>{question.category}</p>
           <h1>{question.prompt}</h1>
           <div className="practice-answer-grid">
             {question.options.map((option, index) => {
@@ -1063,11 +1062,11 @@ function PracticePage({ user, profile, completions, route }: { user: User; profi
           <div className="practice-section-grid">
             {sections.map((section) => {
               const completedLessons = section.lessons.filter((lesson) => completedSet.has(lesson.id)).length
-              const available = completedLessons > 0
+              const available = completedLessons === section.lessons.length
               return <article className={`practice-section-card ${available ? '' : 'locked'}`} key={section.id}>
                 <div className="practice-card-number">{completedLessons}/{section.lessons.length}</div>
                 <div><h3>{section.title}</h3><p>{section.description}</p></div>
-                <div className="practice-card-footer"><span>{available ? `${QUESTION_BANK_SIZE} question bank` : 'Complete a lesson to unlock'}</span><button disabled={!available} onClick={() => startSection(section)} aria-label={`Practice ${section.title}`}>{available ? <Play size={18} fill="currentColor" /> : <LockKeyhole size={18} />}</button></div>
+                <div className="practice-card-footer"><span>{available ? `${QUESTION_BANK_SIZE} unique questions` : 'Complete the section to unlock'}</span><button disabled={!available} onClick={() => startSection(section)} aria-label={`Practice ${section.title}`}>{available ? <Play size={18} fill="currentColor" /> : <LockKeyhole size={18} />}</button></div>
               </article>
             })}
           </div>
