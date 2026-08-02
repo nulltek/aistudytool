@@ -18,6 +18,7 @@ import {
   runTransaction,
   serverTimestamp,
   setDoc,
+  type Timestamp,
   type Unsubscribe,
 } from 'firebase/firestore'
 import { getFirestore } from 'firebase/firestore'
@@ -53,6 +54,11 @@ export type UserProfile = {
   focusTrack?: FocusTrack
   preferences?: UserPreferences
   deactivated?: boolean
+}
+
+export type CompletionRecord = {
+  lessonId: string
+  completedAt?: Timestamp | null
 }
 
 export type ThemePreference = 'light' | 'dark' | 'system'
@@ -164,9 +170,12 @@ export function watchProfile(uid: string, callback: (profile: UserProfile | null
   })
 }
 
-export function watchCompletions(uid: string, callback: (ids: string[]) => void): Unsubscribe {
+export function watchCompletions(uid: string, callback: (records: CompletionRecord[]) => void): Unsubscribe {
   return onSnapshot(collection(db, 'users', uid, 'completedLessons'), (snapshot) => {
-    callback(snapshot.docs.map((item) => item.id))
+    callback(snapshot.docs.map((item) => ({
+      lessonId: item.id,
+      completedAt: item.data().completedAt as Timestamp | null | undefined,
+    })))
   })
 }
 

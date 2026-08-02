@@ -65,6 +65,7 @@ import {
   watchAuth,
   watchCompletions,
   watchProfile,
+  type CompletionRecord,
   type UserProfile,
   type UserPreferences,
 } from './firebase'
@@ -73,6 +74,7 @@ import { chooserQuestions, getModelChoice, makeInstallLesson, modelChoices, reco
 import { progressFromXp, rankFamilies, rankFromLevel } from './progression'
 import { makeAdaptiveUsageLesson } from './adaptiveUsage'
 import { buildQuestionBank, getPracticeSections, pickPracticeSession, PRACTICE_SESSION_SIZE, QUESTION_BANK_SIZE, type PracticeQuestion, type PracticeSection } from './practiceData'
+import { calculateStreakStats, type StreakStats } from './streak'
 
 gsap.registerPlugin(ScrollTrigger, useGSAP)
 
@@ -94,7 +96,7 @@ function useRoute() {
 function useLearner() {
   const [user, setUser] = useState<User | null>(null)
   const [profile, setProfile] = useState<UserProfile | null>(null)
-  const [completions, setCompletions] = useState<string[]>([])
+  const [completionRecords, setCompletionRecords] = useState<CompletionRecord[]>([])
   const [ready, setReady] = useState(false)
   const [error, setError] = useState('')
 
@@ -103,7 +105,7 @@ function useLearner() {
     return watchAuth(async (nextUser) => {
       setUser(nextUser)
       setProfile(null)
-      setCompletions([])
+      setCompletionRecords([])
       if (!nextUser) {
         setReady(true)
         return
@@ -121,12 +123,14 @@ function useLearner() {
   useEffect(() => {
     if (!user) return
     const stopProfile = watchProfile(user.uid, setProfile)
-    const stopCompletions = watchCompletions(user.uid, setCompletions)
+    const stopCompletions = watchCompletions(user.uid, setCompletionRecords)
     return () => {
       stopProfile()
       stopCompletions()
     }
   }, [user])
+
+  const completions = useMemo(() => completionRecords.map((record) => record.lessonId), [completionRecords])
 
   const derivedProfile = useMemo(() => {
     if (!profile) return null
@@ -138,7 +142,7 @@ function useLearner() {
     return { ...profile, xp, gems, level, rank: rankFromLevel(level).name, completedCount: earned.length }
   }, [profile, completions])
 
-  return { user, profile: derivedProfile, completions, ready, error, setError }
+  return { user, profile: derivedProfile, completions, completionRecords, ready, error, setError }
 }
 
 function useAppliedPreferences(profile: UserProfile | null) {
@@ -281,7 +285,8 @@ function AuthScreen({ error, setError }: { error: string; setError: (value: stri
 const navItems = [
   { label: 'Learn', icon: Home, path: '/' },
   { label: 'Practice', icon: Target, path: '/practice' },
-  { label: 'Ranks', icon: Trophy, path: '/profile' },
+  { label: 'Streak', icon: Flame, path: '/streak' },
+  { label: 'Ranks', icon: Trophy, path: '/ranks' },
   { label: 'Profile', icon: CircleUserRound, path: '/profile' },
 ]
 
@@ -290,8 +295,8 @@ function Sidebar({ user, profile, route }: { user: User; profile: UserProfile; r
     <aside className="sidebar">
       <Brand />
       <nav className="side-nav" aria-label="Main navigation">
-        {navItems.map(({ label, icon: Icon, path }, index) => (
-          <button className={`nav-item ${(route === path && (path !== '/' || index === 0)) ? 'active' : ''}`} key={label} onClick={() => goTo(path)}>
+        {navItems.map(({ label, icon: Icon, path }) => (
+          <button className={`nav-item ${route === path ? 'active' : ''}`} key={label} onClick={() => goTo(path)}>
             <Icon size={21} strokeWidth={2.5} /><span>{label}</span>
           </button>
         ))}
@@ -308,16 +313,16 @@ function Sidebar({ user, profile, route }: { user: User; profile: UserProfile; r
   )
 }
 
-function Topbar({ profile }: { profile: UserProfile }) {
+function Topbar({ profile, streak }: { profile: UserProfile; streak: number }) {
   return (
     <header className="topbar">
       <button className="mobile-menu" aria-label="Open menu"><Menu size={21} /></button>
       <div className="mobile-brand"><Brand /></div>
       <div className="top-stats">
-        <div className="stat flame"><Flame size={19} fill="currentColor" /><strong>1</strong><span>day streak</span></div>
+        <button className="stat flame stat-link" onClick={() => goTo('/streak')}><Flame size={19} fill="currentColor" /><strong>{streak}</strong><span>day streak</span></button>
         <div className="stat"><Zap size={19} /><strong>{profile.xp}</strong><span>XP</span></div>
         <div className="stat gem-stat"><Gem size={19} /><strong>{profile.gems}</strong><span>gems</span></div>
-        <button className="league" onClick={() => goTo('/profile')}><ShieldCheck size={18} /><span>{profile.rank}</span><ChevronRight size={15} /></button>
+        <button className="league" onClick={() => goTo('/ranks')}><ShieldCheck size={18} /><span>{profile.rank}</span><ChevronRight size={15} /></button>
       </div>
     </header>
   )
@@ -326,8 +331,8 @@ function Topbar({ profile }: { profile: UserProfile }) {
 function BottomNav({ route }: { route: string }) {
   return (
     <nav className="bottom-nav" aria-label="Mobile navigation">
-      {navItems.map(({ label, icon: Icon, path }, index) => (
-        <button className={(route === path && (path !== '/' || index === 0)) ? 'active' : ''} key={label} onClick={() => goTo(path)}><Icon size={21} /><span>{label}</span></button>
+      {navItems.map(({ label, icon: Icon, path }) => (
+        <button className={route === path ? 'active' : ''} key={label} onClick={() => goTo(path)}><Icon size={21} /><span>{label}</span></button>
       ))}
     </nav>
   )
@@ -357,7 +362,7 @@ function Checkpoint({ lesson, index, completed, unlocked, unavailable = false, d
   )
 }
 
-function Dashboard({ user, profile, completions, route }: { user: User; profile: UserProfile; completions: string[]; route: string }) {
+function Dashboard({ user, profile, completions, route, streak }: { user: User; profile: UserProfile; completions: string[]; route: string; streak: number }) {
   const root = useRef<HTMLDivElement>(null)
   const [focusTrack, setFocusTrack] = useState<FocusTrack | null>(profile.focusTrack ?? null)
   const [savingTrack, setSavingTrack] = useState(false)
@@ -403,7 +408,7 @@ function Dashboard({ user, profile, completions, route }: { user: User; profile:
     <div className="app" ref={root}>
       <Sidebar user={user} profile={profile} route={route} />
       <div className="workspace">
-        <Topbar profile={profile} />
+        <Topbar profile={profile} streak={streak} />
         <div className="content-grid">
           <main className="learning-main">
             <section className="course-hero">
@@ -751,76 +756,134 @@ function LessonPage({ user, lesson, completed }: { user: User; lesson: LessonCon
   )
 }
 
-function ProfilePage({ user, profile, completions, route }: { user: User; profile: UserProfile; completions: string[]; route: string }) {
+function ProfilePage({ user, profile, completions, route, streak }: { user: User; profile: UserProfile; completions: string[]; route: string; streak: number }) {
   const root = useRef<HTMLDivElement>(null)
-  const progress = progressFromXp(profile.xp)
+  const model = getModelChoice(profile.chosenModel)
+  const focusLabel = profile.focusTrack ? `${profile.focusTrack[0].toUpperCase()}${profile.focusTrack.slice(1)}` : 'Not chosen yet'
 
   useGSAP(() => {
-    gsap.from('.rank-family-card', {
-      y: 45,
-      scale: .92,
-      opacity: .2,
-      stagger: .08,
-      duration: .7,
-      ease: 'power3.out',
-      scrollTrigger: { trigger: '.rank-ladder', start: 'top 86%' },
-    })
-    gsap.from('.rank-family-card .rank-medallion', {
-      scale: .72,
-      opacity: .35,
-      stagger: .07,
-      ease: 'none',
-      scrollTrigger: { trigger: '.rank-ladder', start: 'top 90%', end: 'bottom 65%', scrub: .6 },
-    })
+    gsap.from('.profile-hero > *, .profile-stats > *', { y: 25, opacity: 0, stagger: .08, duration: .62, ease: 'power3.out' })
+    gsap.from('.profile-bento-card', { y: 45, scale: .94, opacity: .2, stagger: .1, ease: 'none', scrollTrigger: { trigger: '.profile-bento', start: 'top 88%', end: 'top 55%', scrub: .6 } })
   }, { scope: root })
 
-  return (
-    <div className="app" ref={root}>
-      <Sidebar user={user} profile={profile} route={route} />
-      <div className="workspace profile-workspace">
-        <Topbar profile={profile} />
-        <main className="profile-page">
-          <section className="profile-hero">
-            <div className="profile-identity">
-              {user.photoURL ? <img src={user.photoURL} alt="" referrerPolicy="no-referrer" /> : <div className="profile-avatar-fallback">{profile.displayName.slice(0, 2).toUpperCase()}</div>}
-              <div><p>Your learner profile</p><h1>{profile.displayName}</h1><span>{profile.rank} · Level {profile.level}</span></div>
-            </div>
-            <div className="profile-actions"><button className="secondary-action" onClick={() => goTo('/settings')}><Settings size={18} /> Settings</button><button className="signout-button" onClick={() => signOut()}><LogOut size={18} /> Sign out</button></div>
-          </section>
-          <section className="profile-stats">
-            <div><Zap size={23} /><span>Total XP</span><strong>{profile.xp}</strong></div>
-            <div><Gem size={23} /><span>Gems</span><strong>{profile.gems}</strong></div>
-            <div><BookOpen size={23} /><span>Lessons</span><strong>{completions.length}</strong></div>
-          </section>
-          <section className="level-card">
-            <div><p>Level {profile.level} progress</p><strong>{progress.current} / {progress.needed} XP</strong></div>
-            <div className="level-track"><span style={{ width: `${progress.percent}%` }} /></div>
-            <small>{progress.needed - progress.current} XP to level {profile.level + 1}</small>
-          </section>
-          <section className="rank-section">
-            <div className="path-heading"><div><p>Your mineral league</p><h2>Forty ranks. One climb.</h2></div><span className="section-count">8 minerals · 5 divisions each</span></div>
-            <div className="rank-ladder">
-              {rankFamilies.map((family) => {
-                const firstLevel = family.ranks[0].minLevel
-                const lastLevel = family.ranks[family.ranks.length - 1].minLevel
-                const active = family.ranks.some((rank) => rank.name === profile.rank)
-                const unlocked = profile.level >= firstLevel
-                return <article className={`rank-family-card ${unlocked ? 'unlocked' : ''} ${active ? 'active' : ''}`} key={family.name} style={{ '--rank-tone': family.tone } as CSSProperties}>
-                  <span className="rank-medallion">{unlocked ? <Award size={27} /> : <LockKeyhole size={22} />}</span>
-                  <div className="rank-family-copy"><small>Levels {firstLevel}–{lastLevel}</small><strong>{family.name}</strong></div>
-                  {active && <span className="current-rank">Current</span>}
-                  <div className="division-strip">
-                    {family.ranks.map((rank) => <span className={`${profile.level >= rank.minLevel ? 'passed' : ''} ${profile.rank === rank.name ? 'current' : ''}`} key={rank.name} title={`${rank.name} · Level ${rank.minLevel}`}>{rank.division}</span>)}
-                  </div>
-                </article>
-              })}
-            </div>
-          </section>
-        </main>
-      </div>
-      <BottomNav route={route} />
+  return <div className="app" ref={root}>
+    <Sidebar user={user} profile={profile} route={route} />
+    <div className="workspace profile-workspace">
+      <Topbar profile={profile} streak={streak} />
+      <main className="profile-page">
+        <section className="profile-hero">
+          <div className="profile-identity">
+            {user.photoURL ? <img src={user.photoURL} alt="" referrerPolicy="no-referrer" /> : <div className="profile-avatar-fallback">{profile.displayName.slice(0, 2).toUpperCase()}</div>}
+            <div><p>Your learner profile</p><h1>{profile.displayName}</h1><span>{profile.email}</span></div>
+          </div>
+          <div className="profile-actions"><button className="secondary-action" onClick={() => goTo('/settings')}><Settings size={18} /> Settings</button><button className="signout-button" onClick={() => signOut()}><LogOut size={18} /> Sign out</button></div>
+        </section>
+        <section className="profile-stats" aria-label="Learning totals">
+          <div><Zap size={23} /><span>Total XP</span><strong>{profile.xp}</strong></div>
+          <div><Gem size={23} /><span>Gems</span><strong>{profile.gems}</strong></div>
+          <div><BookOpen size={23} /><span>Lessons</span><strong>{completions.length}</strong></div>
+        </section>
+        <section className="profile-bento">
+          <article className="profile-bento-card model-card"><span className="bento-icon"><Bot size={24} /></span><small>Your AI</small><h2>{model?.name ?? 'Choose your model'}</h2><p>{model ? `Your lessons adapt to ${model.name}.` : 'Finish the model matcher to personalize your path.'}</p><button onClick={() => goTo(model ? '/' : '/lesson/choose-your-model')}>View learning path <ArrowRight size={17} /></button></article>
+          <article className="profile-bento-card focus-card"><span className="bento-icon"><Target size={24} /></span><small>Focus path</small><h2>{focusLabel}</h2><p>Specialized lessons stay matched to what you want AI to help you do.</p><button onClick={() => goTo('/')}>Change on path <ArrowRight size={17} /></button></article>
+          <article className="profile-bento-card rank-preview"><span className="bento-icon"><Award size={24} /></span><small>Current rank</small><h2>{profile.rank}</h2><p>Level {profile.level}. Open the mineral ladder to see every division from I to V.</p><button onClick={() => goTo('/ranks')}>Open ranks <ArrowRight size={17} /></button></article>
+          <article className="profile-bento-card streak-preview"><span className="bento-icon"><Flame size={24} fill="currentColor" /></span><small>Daily rhythm</small><h2>{streak} day{streak === 1 ? '' : 's'}</h2><p>Keep one small promise each day and grow a longer learning streak.</p><button onClick={() => goTo('/streak')}>Open streak <ArrowRight size={17} /></button></article>
+        </section>
+      </main>
     </div>
-  )
+    <BottomNav route={route} />
+  </div>
+}
+
+function RankingPage({ user, profile, route, streak }: { user: User; profile: UserProfile; route: string; streak: number }) {
+  const root = useRef<HTMLDivElement>(null)
+  const progress = progressFromXp(profile.xp)
+  const nextRank = rankFromLevel(profile.level + 1)
+
+  useGSAP(() => {
+    gsap.from('.ranking-hero-copy > *, .rank-hero-medallion', { y: 28, opacity: 0, stagger: .09, duration: .7, ease: 'power3.out' })
+    gsap.from('.rank-family-card', { y: 48, scale: .92, opacity: .2, stagger: .07, duration: .72, ease: 'power3.out', scrollTrigger: { trigger: '.rank-ladder', start: 'top 86%' } })
+    gsap.from('.rank-family-card .rank-medallion', { scale: .72, opacity: .35, stagger: .07, ease: 'none', scrollTrigger: { trigger: '.rank-ladder', start: 'top 90%', end: 'bottom 65%', scrub: .6 } })
+  }, { scope: root })
+
+  return <div className="app" ref={root}>
+    <Sidebar user={user} profile={profile} route={route} />
+    <div className="workspace ranking-workspace">
+      <Topbar profile={profile} streak={streak} />
+      <main className="ranking-page">
+        <section className="ranking-hero">
+          <div className="ranking-hero-copy"><p>Your mineral league</p><h1>Climb one honest lesson at a time.</h1><span>XP raises your level. Every five levels opens a new mineral family.</span><div className="ranking-progress"><div><strong>Level {profile.level}</strong><span>{progress.current} / {progress.needed} XP</span></div><div className="level-track"><span style={{ width: `${progress.percent}%` }} /></div><small>Next: {nextRank.name} at level {nextRank.minLevel}</small></div></div>
+          <div className="rank-hero-medallion"><Award size={62} /><span>Current rank</span><strong>{profile.rank}</strong><i /><i /></div>
+        </section>
+        <section className="rank-section">
+          <div className="path-heading"><div><p>Complete ladder</p><h2>Eight minerals. Five divisions each.</h2></div><span className="section-count">I → V in every family</span></div>
+          <div className="rank-ladder">
+            {rankFamilies.map((family) => {
+              const firstLevel = family.ranks[0].minLevel
+              const lastLevel = family.ranks[family.ranks.length - 1].minLevel
+              const active = family.ranks.some((rank) => rank.name === profile.rank)
+              const unlocked = profile.level >= firstLevel
+              return <article className={`rank-family-card ${unlocked ? 'unlocked' : ''} ${active ? 'active' : ''}`} key={family.name} style={{ '--rank-tone': family.tone } as CSSProperties}>
+                <span className="rank-medallion">{unlocked ? <Award size={27} /> : <LockKeyhole size={22} />}</span>
+                <div className="rank-family-copy"><small>Levels {firstLevel}–{lastLevel}</small><strong>{family.name}</strong></div>
+                {active && <span className="current-rank">Current</span>}
+                <div className="division-strip">{family.ranks.map((rank) => <span className={`${profile.level >= rank.minLevel ? 'passed' : ''} ${profile.rank === rank.name ? 'current' : ''}`} key={rank.name} title={`${rank.name} · Level ${rank.minLevel}`}>{rank.division}</span>)}</div>
+              </article>
+            })}
+          </div>
+          <aside className="rank-explainer"><ShieldCheck size={25} /><div><strong>Ranks never decay.</strong><span>Learn at your pace. Your earned level, mineral, XP, and gems stay with your profile.</span></div></aside>
+        </section>
+      </main>
+    </div>
+    <BottomNav route={route} />
+  </div>
+}
+
+const streakMilestones = [3, 7, 14, 30, 60, 100]
+const streakNotes = [
+  ['Make it tiny', 'One completed lesson is enough to keep the chain alive. Consistency beats a heroic study sprint.'],
+  ['Use the same cue', 'Open Model Trail after coffee, lunch, or another habit that already happens every day.'],
+  ['Return without guilt', 'A missed day is data, not failure. Start a fresh chain with the smallest useful lesson.'],
+]
+
+function StreakPage({ user, profile, completions, route, stats }: { user: User; profile: UserProfile; completions: string[]; route: string; stats: StreakStats }) {
+  const root = useRef<HTMLDivElement>(null)
+  const [noteIndex, setNoteIndex] = useState(0)
+  const focusLessons = profile.focusTrack ? trackSections[profile.focusTrack].flatMap((section) => section.lessons) : []
+  const activeLessons = [...sectionOneLessons, ...sectionTwoLessons, ...promptLessons, ...adaptiveUsageLessons, ...focusLessons]
+  const nextLesson = activeLessons.find((lesson) => !completions.includes(lesson.id))
+  const nextMilestone = streakMilestones.find((days) => days > stats.current) ?? 100
+  const milestoneProgress = Math.min(100, (stats.current / nextMilestone) * 100)
+
+  useGSAP(() => {
+    gsap.from('.streak-hero-copy > *, .streak-flame-stage', { y: 26, opacity: 0, stagger: .08, duration: .7, ease: 'power3.out' })
+    gsap.from('.streak-panel', { y: 65, scale: .94, opacity: .18, stagger: .08, ease: 'none', scrollTrigger: { trigger: '.streak-dashboard', start: 'top 90%', end: 'top 55%', scrub: .7 } })
+    gsap.from('.streak-story-word', { opacity: .16, stagger: .025, ease: 'none', scrollTrigger: { trigger: '.streak-story', start: 'top 84%', end: 'bottom 58%', scrub: .8 } })
+    gsap.to('.streak-flame-stage svg', { y: -9, rotate: 3, repeat: -1, yoyo: true, duration: .9, ease: 'sine.inOut' })
+  }, { scope: root })
+
+  return <div className="app" ref={root}>
+    <Sidebar user={user} profile={profile} route={route} />
+    <div className="workspace streak-workspace">
+      <Topbar profile={profile} streak={stats.current} />
+      <main className="streak-page">
+        <section className="streak-hero">
+          <div className="streak-hero-copy"><p>Daily streak</p><h1>Small sparks become a learning habit.</h1><span>{stats.todayCount > 0 ? `Today is safe. You completed ${stats.todayCount} lesson${stats.todayCount === 1 ? '' : 's'}.` : 'Complete one lesson today to light the flame.'}</span><button className="continue-button" onClick={() => goTo(nextLesson ? `/lesson/${nextLesson.id}` : '/practice')}>{nextLesson ? 'Continue next lesson' : 'Start daily practice'} <ArrowRight size={19} /></button></div>
+          <div className={`streak-flame-stage ${stats.todayCount ? 'lit' : ''}`}><span>{stats.current}</span><Flame size={122} fill="currentColor" /><strong>day streak</strong><i /><i /><i /></div>
+        </section>
+        <section className="streak-dashboard">
+          <article className="streak-panel today-goal"><div className="panel-label"><Target size={19} /><span>Today’s goal</span></div><strong>{stats.todayCount > 0 ? 'Complete' : 'One lesson'}</strong><p>{stats.todayCount > 0 ? 'Flame protected. Extra lessons still strengthen recall.' : 'Any lesson counts. Keep the promise deliberately small.'}</p><div className="goal-track"><span style={{ width: stats.todayCount > 0 ? '100%' : '0%' }} /></div><small>{Math.min(stats.todayCount, 1)} / 1 lesson</small></article>
+          <article className="streak-panel streak-record"><div><CalendarDays size={22} /><span>Longest streak</span><strong>{stats.longest} days</strong></div><div><BookOpen size={22} /><span>Active days</span><strong>{stats.activeDays}</strong></div></article>
+          <article className="streak-panel activity-calendar"><div className="panel-heading"><div><span>Last 28 days</span><strong>Your activity trail</strong></div><small>Darker = more lessons</small></div><div className="heatmap" aria-label="Lesson activity over the last 28 days">{stats.calendar.map((day) => <div className={`${day.count ? 'active' : ''} ${day.isToday ? 'today' : ''}`} style={{ '--heat': Math.min(1, .28 + day.count * .24) } as CSSProperties} key={day.key} title={`${day.key}: ${day.count} lesson${day.count === 1 ? '' : 's'}`}><span>{day.label[0]}</span><b>{day.dayNumber}</b></div>)}</div></article>
+        </section>
+        <section className="milestone-section"><div className="path-heading"><div><p>Future sparks</p><h2>Milestones worth reaching.</h2></div><span className="section-count">Next target: {nextMilestone} days</span></div><div className="milestone-accordion">{streakMilestones.map((days) => { const earned = stats.current >= days; return <article className={`${earned ? 'earned' : ''} ${days === nextMilestone ? 'next' : ''}`} key={days}><Flame size={25} fill={earned ? 'currentColor' : 'none'} /><div><strong>{days}</strong><span>days</span><p>{earned ? 'Milestone earned' : days === nextMilestone ? `${days - stats.current} to go` : 'Waiting ahead'}</p></div></article> })}</div><div className="milestone-progress"><span style={{ width: `${milestoneProgress}%` }} /></div></section>
+        <section className="streak-story"><p>{'A good streak is not a score to defend. It is proof that you can return, learn one useful thing, and leave the path a little stronger than you found it.'.split(' ').map((word, index) => <span className="streak-story-word" key={`${word}-${index}`}>{word} </span>)}</p></section>
+        <section className="streak-note-carousel"><div className="note-count">0{noteIndex + 1} / 0{streakNotes.length}</div><div className="note-copy"><p>Daily field note</p><h2>{streakNotes[noteIndex][0]}</h2><span>{streakNotes[noteIndex][1]}</span></div><div className="note-controls"><button onClick={() => setNoteIndex((noteIndex - 1 + streakNotes.length) % streakNotes.length)} aria-label="Previous note"><ArrowLeft size={19} /></button><button onClick={() => setNoteIndex((noteIndex + 1) % streakNotes.length)} aria-label="Next note"><ArrowRight size={19} /></button></div></section>
+        <div className="streak-marquee" aria-hidden="true"><div>{Array.from({ length: 2 }, (_, group) => <span key={group}>SHOW UP <i>•</i> LEARN ONE THING <i>•</i> KEEP THE SPARK <i>•</i> </span>)}</div></div>
+      </main>
+    </div>
+    <BottomNav route={route} />
+  </div>
 }
 
 function SettingToggle({ checked, label, copy, onChange }: { checked: boolean; label: string; copy: string; onChange: (checked: boolean) => void }) {
@@ -830,7 +893,7 @@ function SettingToggle({ checked, label, copy, onChange }: { checked: boolean; l
   </button>
 }
 
-function SettingsPage({ user, profile, route }: { user: User; profile: UserProfile; route: string }) {
+function SettingsPage({ user, profile, route, streak }: { user: User; profile: UserProfile; route: string; streak: number }) {
   const root = useRef<HTMLDivElement>(null)
   const [preferences, setPreferences] = useState<UserPreferences>(profile.preferences ?? defaultPreferences)
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
@@ -872,7 +935,7 @@ function SettingsPage({ user, profile, route }: { user: User; profile: UserProfi
   return <div className="app" ref={root}>
     <Sidebar user={user} profile={profile} route={route} />
     <div className="workspace settings-workspace">
-      <Topbar profile={profile} />
+      <Topbar profile={profile} streak={streak} />
       <main className="settings-page">
         <section className="settings-hero">
           <div className="settings-hero-copy"><p>Make the trail yours</p><h1>Comfort, focus, and account control.</h1><span>Preferences follow your learner profile across sessions.</span></div>
@@ -943,7 +1006,7 @@ function playPracticeTone(enabled: boolean, correct: boolean) {
 
 type PracticeSession = { title: string; bank: PracticeQuestion[]; questions: PracticeQuestion[] }
 
-function PracticePage({ user, profile, completions, route }: { user: User; profile: UserProfile; completions: string[]; route: string }) {
+function PracticePage({ user, profile, completions, route, streak }: { user: User; profile: UserProfile; completions: string[]; route: string; streak: number }) {
   const root = useRef<HTMLDivElement>(null)
   const model = getModelChoice(profile.chosenModel)
   const sections = useMemo(() => getPracticeSections(profile.focusTrack, model), [profile.focusTrack, model])
@@ -1044,7 +1107,7 @@ function PracticePage({ user, profile, completions, route }: { user: User; profi
   return <div className="app" ref={root}>
     <Sidebar user={user} profile={profile} route={route} />
     <div className="workspace practice-workspace">
-      <Topbar profile={profile} />
+      <Topbar profile={profile} streak={streak} />
       <main className="practice-page">
         <section className="practice-hero">
           <div className="practice-hero-copy"><p>Recall makes knowledge stick</p><h1>Practice the path you have earned.</h1><span>Choose a section or mix every completed lesson into one five-question revision.</span></div>
@@ -1079,7 +1142,8 @@ function PracticePage({ user, profile, completions, route }: { user: User; profi
 
 export default function App() {
   const route = useRoute()
-  const { user, profile, completions, ready, error, setError } = useLearner()
+  const { user, profile, completions, completionRecords, ready, error, setError } = useLearner()
+  const streakStats = useMemo(() => calculateStreakStats(completionRecords), [completionRecords])
   useAppliedPreferences(profile)
 
   if (!ready) return <LoadingScreen />
@@ -1110,8 +1174,10 @@ export default function App() {
     if (lesson) return <LessonPage user={user} lesson={lesson} completed={completions.includes(lesson.id)} />
   }
 
-  if (route === '/profile') return <ProfilePage user={user} profile={profile} completions={completions} route={route} />
-  if (route === '/practice') return <PracticePage user={user} profile={profile} completions={completions} route={route} />
-  if (route === '/settings') return <SettingsPage user={user} profile={profile} route={route} />
-  return <Dashboard user={user} profile={profile} completions={completions} route={route} />
+  if (route === '/profile') return <ProfilePage user={user} profile={profile} completions={completions} route={route} streak={streakStats.current} />
+  if (route === '/ranks') return <RankingPage user={user} profile={profile} route={route} streak={streakStats.current} />
+  if (route === '/streak') return <StreakPage user={user} profile={profile} completions={completions} route={route} stats={streakStats} />
+  if (route === '/practice') return <PracticePage user={user} profile={profile} completions={completions} route={route} streak={streakStats.current} />
+  if (route === '/settings') return <SettingsPage user={user} profile={profile} route={route} streak={streakStats.current} />
+  return <Dashboard user={user} profile={profile} completions={completions} route={route} streak={streakStats.current} />
 }

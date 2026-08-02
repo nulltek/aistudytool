@@ -67,6 +67,13 @@ If a chosen model does not provide an official GUI or CLI route, the correspondi
 - Saved theme, sound, and reduced-motion preferences.
 - Reversible profile deactivation. Deactivation signs the learner out but preserves XP, gems, ranks, choices, and lesson history.
 
+### Learner hub pages
+
+- A dedicated **Profile** page for identity, totals, selected AI, specialist track, and shortcuts to account settings.
+- A dedicated **Ranks** page for current-rank progress and the complete eight-mineral, forty-division ladder.
+- A dedicated **Daily Streak** page calculated from real lesson-completion timestamps. It includes today’s goal, current and longest streaks, a 28-day activity heatmap, milestones, habit notes, and a direct action to the next lesson.
+- Exclusive route-aware navigation: Learn, Practice, Streak, Ranks, and Profile each have their own URL and only the open destination is highlighted.
+
 ### Appearance and accessibility
 
 - Light theme.
