@@ -924,9 +924,12 @@ function FriendsPage({ user, profile, route, streak, notifications, requests, re
   const [searching, setSearching] = useState(false)
   const [searched, setSearched] = useState(false)
   const [sentIds, setSentIds] = useState<Set<string>>(new Set())
+  const [sendingUid, setSendingUid] = useState('')
   const [requestIndex, setRequestIndex] = useState(0)
   const [busyRequest, setBusyRequest] = useState('')
-  const [message, setMessage] = useState('')
+  const [searchMessage, setSearchMessage] = useState('')
+  const [searchMessageSuccess, setSearchMessageSuccess] = useState(false)
+  const [requestMessage, setRequestMessage] = useState('')
   const friendIds = useMemo(() => new Set(friends.map((friend) => friend.uid)), [friends])
   const incomingIds = useMemo(() => new Set(requests.map((request) => request.fromUid)), [requests])
   const activeRequest = requests.length ? requests[Math.min(requestIndex, requests.length - 1)] : null
@@ -935,34 +938,41 @@ function FriendsPage({ user, profile, route, streak, notifications, requests, re
     event.preventDefault()
     setSearching(true)
     setSearched(true)
-    setMessage('')
+    setSearchMessage('')
+    setSearchMessageSuccess(false)
     try {
       setResults(await searchPublicProfiles(user, searchTerm))
     } catch (reason) {
-      setMessage((reason as Error).message || 'Search failed.')
+      setSearchMessage((reason as Error).message || 'Search failed.')
     } finally {
       setSearching(false)
     }
   }
 
   const addFriend = async (uid: string) => {
-    setMessage('')
+    setSendingUid(uid)
+    setSearchMessage('')
+    setSearchMessageSuccess(false)
     try {
       await sendFriendRequest(user, uid)
       setSentIds((current) => new Set(current).add(uid))
+      setSearchMessage('Friend request sent. It will appear in their invitations.')
+      setSearchMessageSuccess(true)
     } catch (reason) {
-      setMessage((reason as Error).message || 'Friend request could not be sent.')
+      setSearchMessage((reason as Error).message || 'Friend request could not be sent.')
+    } finally {
+      setSendingUid('')
     }
   }
 
   const answerRequest = async (request: FriendRequest, response: 'accepted' | 'declined') => {
     setBusyRequest(request.id)
-    setMessage('')
+    setRequestMessage('')
     try {
       await respondToFriendRequest(user, request, response)
       setRequestIndex(0)
     } catch (reason) {
-      setMessage((reason as Error).message || 'Friend request could not be updated.')
+      setRequestMessage((reason as Error).message || 'Friend request could not be updated.')
     } finally {
       setBusyRequest('')
     }
@@ -990,7 +1000,8 @@ function FriendsPage({ user, profile, route, streak, notifications, requests, re
           <article className="friend-search-panel">
             <div><p>Find a learner</p><h2>Search the trail.</h2><span>Enter a username, the start of one, or a complete 12-character friend code.</span></div>
             <form onSubmit={searchFriends}><Search size={20} /><input value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} placeholder="Username or friend code" aria-label="Username or friend code" /><button disabled={searching || !searchTerm.trim()}>{searching ? <LoaderCircle className="loading-spinner" size={18} /> : 'Search'}</button></form>
-            {searched && <div className="friend-search-results">{results.length === 0 && !searching ? <p>No learners found. Check the spelling or code.</p> : results.map((result) => { const isFriend = friendIds.has(result.uid); const incoming = incomingIds.has(result.uid); const sent = sentIds.has(result.uid); return <div key={result.uid}>{result.photoURL ? <img src={result.photoURL} alt="" /> : <span>{result.username.slice(0, 2).toUpperCase()}</span>}<div><strong>{result.username}</strong><small>{result.friendCode.match(/.{1,4}/g)?.join(' ')}</small></div><button disabled={isFriend || incoming || sent} onClick={() => addFriend(result.uid)} type="button">{isFriend ? <><UserCheck size={17} /> Friends</> : incoming ? 'Respond below' : sent ? 'Request sent' : <><UserPlus size={17} /> Add friend</>}</button></div> })}</div>}
+            {searched && <div className="friend-search-results">{results.length === 0 && !searching ? <p>No learners found. Check the spelling or code.</p> : results.map((result) => { const isFriend = friendIds.has(result.uid); const incoming = incomingIds.has(result.uid); const sent = sentIds.has(result.uid); const sending = sendingUid === result.uid; return <div key={result.uid}>{result.photoURL ? <img src={result.photoURL} alt="" /> : <span>{result.username.slice(0, 2).toUpperCase()}</span>}<div><strong>{result.username}</strong><small>{result.friendCode.match(/.{1,4}/g)?.join(' ')}</small></div><button disabled={isFriend || incoming || sent || Boolean(sendingUid)} onClick={() => addFriend(result.uid)} type="button">{isFriend ? <><UserCheck size={17} /> Friends</> : incoming ? 'Respond below' : sent ? 'Request sent' : sending ? <><LoaderCircle className="loading-spinner" size={17} /> Sending</> : <><UserPlus size={17} /> Add friend</>}</button></div> })}</div>}
+            {searchMessage && <div className={`${searchMessageSuccess ? 'friend-success' : 'auth-error'} friends-message`} role="status">{searchMessage}</div>}
           </article>
 
           <article className="friend-request-panel">
@@ -1001,7 +1012,7 @@ function FriendsPage({ user, profile, route, streak, notifications, requests, re
           <article className="friend-rhythm-panel"><Flame size={31} fill="currentColor" /><div><p>Your shared rhythm</p><strong>{friends.length ? `${friends.filter((friend) => friend.streak > 0).length} active today` : 'Build your circle'}</strong><span>{friends.length ? 'Open the cards below to see where everyone is learning.' : 'Search for a friend to start sharing progress.'}</span></div></article>
         </section>
 
-        {(message || requestError) && <div className="auth-error friends-message" role="status">{message || requestError}</div>}
+        {(requestMessage || requestError) && <div className="auth-error friends-message" role="status">{requestMessage || requestError}</div>}
 
         <section className="friends-library">
           <div className="friends-library-heading"><p>Your circle</p><h2>Learning now.</h2><span>Friend activity updates as they complete lessons and keep their streak alive.</span></div>

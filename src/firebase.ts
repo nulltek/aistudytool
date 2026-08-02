@@ -296,7 +296,10 @@ export async function sendFriendRequest(user: User, toUid: string) {
     if (!sender.exists() || !recipient.exists()) throw new Error('That learner is not available.')
     if (friendship.exists()) throw new Error('You are already friends.')
     if (reverse.exists() && reverse.data().status === 'pending') throw new Error('This learner already invited you. Open your requests to respond.')
-    if (existing.exists()) throw new Error(existing.data().status === 'pending' ? 'Friend request already sent.' : 'A previous request with this learner has already been resolved.')
+    if (existing.exists()) {
+      if (existing.data().status === 'pending') return
+      throw new Error('A previous request with this learner has already been resolved.')
+    }
     transaction.set(requestRef, {
       fromUid: user.uid,
       toUid,
