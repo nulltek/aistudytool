@@ -113,6 +113,7 @@ function useLearner() {
   const [profile, setProfile] = useState<UserProfile | null>(null)
   const [completionRecords, setCompletionRecords] = useState<CompletionRecord[]>([])
   const [friendRequests, setFriendRequests] = useState<FriendRequest[]>([])
+  const [friendRequestError, setFriendRequestError] = useState('')
   const [friends, setFriends] = useState<PublicProfile[]>([])
   const [ready, setReady] = useState(false)
   const [error, setError] = useState('')
@@ -124,6 +125,7 @@ function useLearner() {
       setProfile(null)
       setCompletionRecords([])
       setFriendRequests([])
+      setFriendRequestError('')
       setFriends([])
       if (!nextUser) {
         setReady(true)
@@ -143,7 +145,10 @@ function useLearner() {
     if (!user) return
     const stopProfile = watchProfile(user.uid, setProfile)
     const stopCompletions = watchCompletions(user.uid, setCompletionRecords)
-    const stopRequests = watchIncomingFriendRequests(user.uid, setFriendRequests)
+    const stopRequests = watchIncomingFriendRequests(user.uid, (requests) => {
+      setFriendRequests(requests)
+      setFriendRequestError('')
+    }, (reason) => setFriendRequestError(reason.message || 'Friend requests could not be loaded.'))
     const stopFriends = watchFriendProfiles(user.uid, setFriends)
     return () => {
       stopProfile()
@@ -165,7 +170,7 @@ function useLearner() {
     return { ...profile, xp, gems, level, rank: rankFromLevel(level).name, completedCount: earned.length }
   }, [profile, completions])
 
-  return { user, profile: derivedProfile, completions, completionRecords, friendRequests, friends, ready, error, setError }
+  return { user, profile: derivedProfile, completions, completionRecords, friendRequests, friendRequestError, friends, ready, error, setError }
 }
 
 function useAppliedPreferences(profile: UserProfile | null) {
@@ -912,7 +917,7 @@ function StreakPage({ user, profile, completions, route, stats, notifications }:
   </div>
 }
 
-function FriendsPage({ user, profile, route, streak, notifications, requests, friends }: { user: User; profile: UserProfile; route: string; streak: number; notifications: number; requests: FriendRequest[]; friends: PublicProfile[] }) {
+function FriendsPage({ user, profile, route, streak, notifications, requests, requestError, friends }: { user: User; profile: UserProfile; route: string; streak: number; notifications: number; requests: FriendRequest[]; requestError: string; friends: PublicProfile[] }) {
   const root = useRef<HTMLDivElement>(null)
   const [searchTerm, setSearchTerm] = useState('')
   const [results, setResults] = useState<PublicProfile[]>([])
@@ -996,7 +1001,7 @@ function FriendsPage({ user, profile, route, streak, notifications, requests, fr
           <article className="friend-rhythm-panel"><Flame size={31} fill="currentColor" /><div><p>Your shared rhythm</p><strong>{friends.length ? `${friends.filter((friend) => friend.streak > 0).length} active today` : 'Build your circle'}</strong><span>{friends.length ? 'Open the cards below to see where everyone is learning.' : 'Search for a friend to start sharing progress.'}</span></div></article>
         </section>
 
-        {message && <div className="auth-error friends-message" role="status">{message}</div>}
+        {(message || requestError) && <div className="auth-error friends-message" role="status">{message || requestError}</div>}
 
         <section className="friends-library">
           <div className="friends-library-heading"><p>Your circle</p><h2>Learning now.</h2><span>Friend activity updates as they complete lessons and keep their streak alive.</span></div>
@@ -1345,7 +1350,7 @@ function PracticePage({ user, profile, completions, route, streak, notifications
 
 export default function App() {
   const route = useRoute()
-  const { user, profile, completions, completionRecords, friendRequests, friends, ready, error, setError } = useLearner()
+  const { user, profile, completions, completionRecords, friendRequests, friendRequestError, friends, ready, error, setError } = useLearner()
   const streakStats = useMemo(() => calculateStreakStats(completionRecords), [completionRecords])
   const notifications = friendRequests.filter((request) => !request.seenAt).length
   const socialPath = useMemo(() => {
@@ -1398,7 +1403,7 @@ export default function App() {
   if (route === '/profile') return <ProfilePage user={user} profile={profile} completions={completions} route={route} streak={streakStats.current} notifications={notifications} />
   if (route === '/ranks') return <RankingPage user={user} profile={profile} route={route} streak={streakStats.current} notifications={notifications} />
   if (route === '/streak') return <StreakPage user={user} profile={profile} completions={completions} route={route} stats={streakStats} notifications={notifications} />
-  if (route === '/friends') return <FriendsPage user={user} profile={profile} route={route} streak={streakStats.current} notifications={notifications} requests={friendRequests} friends={friends} />
+  if (route === '/friends') return <FriendsPage user={user} profile={profile} route={route} streak={streakStats.current} notifications={notifications} requests={friendRequests} requestError={friendRequestError} friends={friends} />
   if (route === '/practice') return <PracticePage user={user} profile={profile} completions={completions} route={route} streak={streakStats.current} notifications={notifications} />
   if (route === '/settings') return <SettingsPage user={user} profile={profile} route={route} streak={streakStats.current} notifications={notifications} />
   return <Dashboard user={user} profile={profile} completions={completions} route={route} streak={streakStats.current} notifications={notifications} />

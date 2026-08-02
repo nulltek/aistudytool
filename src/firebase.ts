@@ -308,16 +308,20 @@ export async function sendFriendRequest(user: User, toUid: string) {
   })
 }
 
-export function watchIncomingFriendRequests(uid: string, callback: (requests: FriendRequest[]) => void): Unsubscribe {
+export function watchIncomingFriendRequests(uid: string, callback: (requests: FriendRequest[]) => void, onError?: (error: Error) => void): Unsubscribe {
   const incoming = query(collection(db, 'friendRequests'), where('toUid', '==', uid), where('status', '==', 'pending'))
   return onSnapshot(incoming, async (snapshot) => {
-    const requests = await Promise.all(snapshot.docs.map(async (item) => {
-      const data = item.data() as Omit<FriendRequest, 'id' | 'sender'>
-      const sender = await getDoc(doc(db, 'publicProfiles', data.fromUid))
-      return { ...data, id: item.id, sender: sender.exists() ? sender.data() as PublicProfile : undefined }
-    }))
-    callback(requests)
-  })
+    try {
+      const requests = await Promise.all(snapshot.docs.map(async (item) => {
+        const data = item.data() as Omit<FriendRequest, 'id' | 'sender'>
+        const sender = await getDoc(doc(db, 'publicProfiles', data.fromUid))
+        return { ...data, id: item.id, sender: sender.exists() ? sender.data() as PublicProfile : undefined }
+      }))
+      callback(requests)
+    } catch (error) {
+      onError?.(error as Error)
+    }
+  }, (error) => onError?.(error))
 }
 
 export async function markFriendRequestsSeen(user: User, requests: FriendRequest[]) {
