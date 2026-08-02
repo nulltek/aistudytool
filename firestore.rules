@@ -10,6 +10,14 @@ service cloud.firestore {
       return signedIn() && request.auth.uid == uid;
     }
 
+    function isFriendRequestParticipant(requestId) {
+      return signedIn()
+        && (
+          requestId.matches('^' + request.auth.uid + '_[^_]+$')
+          || requestId.matches('^[^_]+_' + request.auth.uid + '$')
+        );
+    }
+
     function validUsername(data) {
       return data.username is string
         && data.username.size() >= 3
@@ -184,7 +192,8 @@ service cloud.firestore {
     }
 
     match /friendRequests/{requestId} {
-      allow read: if signedIn() && request.auth.uid in [resource.data.fromUid, resource.data.toUid];
+      allow read: if isFriendRequestParticipant(requestId)
+        || (signedIn() && request.auth.uid in [resource.data.fromUid, resource.data.toUid]);
       allow create: if signedIn()
         && request.resource.data.keys().hasOnly(['fromUid', 'toUid', 'status', 'seenAt', 'createdAt', 'updatedAt'])
         && request.resource.data.fromUid == request.auth.uid
