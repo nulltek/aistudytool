@@ -72,7 +72,10 @@ If a chosen model does not provide an official GUI or CLI route, the correspondi
 - A dedicated **Profile** page for identity, totals, selected AI, specialist track, and shortcuts to account settings.
 - A dedicated **Ranks** page for current-rank progress and the complete eight-mineral, forty-division ladder.
 - A dedicated **Daily Streak** page calculated from real lesson-completion timestamps. It includes today’s goal, current and longest streaks, a 28-day activity heatmap, milestones, habit notes, and a direct action to the next lesson.
-- Exclusive route-aware navigation: Learn, Practice, Streak, Ranks, and Profile each have their own URL and only the open destination is highlighted.
+- A dedicated **Friends** page with username/friend-code search, friend requests, accept/decline controls, unread-request badges, and live friend streak/current-lesson cards.
+- A profile editor for unique usernames and cropped custom avatars. Images are resized to a compact 320 × 320 JPEG before they are saved.
+- Every learner receives a collision-checked, 12-character friend code that can be copied from the Profile page.
+- Exclusive route-aware navigation: Learn, Practice, Streak, Ranks, Friends, and Profile each have their own URL and only the open destination is highlighted.
 
 ### Appearance and accessibility
 

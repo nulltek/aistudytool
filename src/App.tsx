@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type FormEvent } from 'react'
 import { useGSAP } from '@gsap/react'
 import gsap from 'gsap'
 import { ScrollTrigger } from 'gsap/ScrollTrigger'
@@ -12,9 +12,11 @@ import {
   BrainCircuit,
   BookOpen,
   CalendarDays,
+  Camera,
   Check,
   ChevronRight,
   CircleUserRound,
+  Copy,
   Code2,
   Crown,
   Flame,
@@ -44,6 +46,9 @@ import {
   Sun,
   Target,
   Trophy,
+  UserCheck,
+  UserPlus,
+  Users,
   UserX,
   Volume2,
   Workflow,
@@ -56,16 +61,26 @@ import {
   defaultPreferences,
   ensureUserProfile,
   finishRedirectSignIn,
+  markFriendRequestsSeen,
   reactivateProfile,
+  respondToFriendRequest,
+  saveProfileIdentity,
   saveFocusTrack,
   saveChosenModel,
   saveUserPreferences,
+  searchPublicProfiles,
+  sendFriendRequest,
   signInWithGoogle,
   signOut,
+  syncPublicProgress,
   watchAuth,
   watchCompletions,
+  watchFriendProfiles,
+  watchIncomingFriendRequests,
   watchProfile,
   type CompletionRecord,
+  type FriendRequest,
+  type PublicProfile,
   type UserProfile,
   type UserPreferences,
 } from './firebase'
@@ -97,6 +112,8 @@ function useLearner() {
   const [user, setUser] = useState<User | null>(null)
   const [profile, setProfile] = useState<UserProfile | null>(null)
   const [completionRecords, setCompletionRecords] = useState<CompletionRecord[]>([])
+  const [friendRequests, setFriendRequests] = useState<FriendRequest[]>([])
+  const [friends, setFriends] = useState<PublicProfile[]>([])
   const [ready, setReady] = useState(false)
   const [error, setError] = useState('')
 
@@ -106,6 +123,8 @@ function useLearner() {
       setUser(nextUser)
       setProfile(null)
       setCompletionRecords([])
+      setFriendRequests([])
+      setFriends([])
       if (!nextUser) {
         setReady(true)
         return
@@ -124,9 +143,13 @@ function useLearner() {
     if (!user) return
     const stopProfile = watchProfile(user.uid, setProfile)
     const stopCompletions = watchCompletions(user.uid, setCompletionRecords)
+    const stopRequests = watchIncomingFriendRequests(user.uid, setFriendRequests)
+    const stopFriends = watchFriendProfiles(user.uid, setFriends)
     return () => {
       stopProfile()
       stopCompletions()
+      stopRequests()
+      stopFriends()
     }
   }, [user])
 
@@ -142,7 +165,7 @@ function useLearner() {
     return { ...profile, xp, gems, level, rank: rankFromLevel(level).name, completedCount: earned.length }
   }, [profile, completions])
 
-  return { user, profile: derivedProfile, completions, completionRecords, ready, error, setError }
+  return { user, profile: derivedProfile, completions, completionRecords, friendRequests, friends, ready, error, setError }
 }
 
 function useAppliedPreferences(profile: UserProfile | null) {
@@ -287,25 +310,26 @@ const navItems = [
   { label: 'Practice', icon: Target, path: '/practice' },
   { label: 'Streak', icon: Flame, path: '/streak' },
   { label: 'Ranks', icon: Trophy, path: '/ranks' },
+  { label: 'Friends', icon: Users, path: '/friends' },
   { label: 'Profile', icon: CircleUserRound, path: '/profile' },
 ]
 
-function Sidebar({ user, profile, route }: { user: User; profile: UserProfile; route: string }) {
+function Sidebar({ profile, route, notifications }: { user: User; profile: UserProfile; route: string; notifications: number }) {
   return (
     <aside className="sidebar">
       <Brand />
       <nav className="side-nav" aria-label="Main navigation">
         {navItems.map(({ label, icon: Icon, path }) => (
           <button className={`nav-item ${route === path ? 'active' : ''}`} key={label} onClick={() => goTo(path)}>
-            <Icon size={21} strokeWidth={2.5} /><span>{label}</span>
+            <Icon size={21} strokeWidth={2.5} /><span>{label}</span>{label === 'Friends' && notifications > 0 && <b className="nav-notification">{Math.min(99, notifications)}</b>}
           </button>
         ))}
       </nav>
       <div className="sidebar-foot">
         <button className={`nav-item ${route === '/settings' ? 'active' : ''}`} onClick={() => goTo('/settings')}><Settings size={21} /><span>Settings</span></button>
         <button className="profile-chip profile-chip-button" onClick={() => goTo('/profile')}>
-          {user.photoURL ? <img className="avatar-photo" src={user.photoURL} alt="" referrerPolicy="no-referrer" /> : <div className="avatar">{profile.displayName.slice(0, 2).toUpperCase()}</div>}
-          <div><strong>{profile.displayName}</strong><span>Level {profile.level} · {profile.rank}</span></div>
+          {profile.photoURL ? <img className="avatar-photo" src={profile.photoURL} alt="" referrerPolicy="no-referrer" /> : <div className="avatar">{profile.username.slice(0, 2).toUpperCase()}</div>}
+          <div><strong>{profile.username}</strong><span>Level {profile.level} · {profile.rank}</span></div>
           <ChevronRight size={17} />
         </button>
       </div>
@@ -328,11 +352,11 @@ function Topbar({ profile, streak }: { profile: UserProfile; streak: number }) {
   )
 }
 
-function BottomNav({ route }: { route: string }) {
+function BottomNav({ route, notifications }: { route: string; notifications: number }) {
   return (
     <nav className="bottom-nav" aria-label="Mobile navigation">
       {navItems.map(({ label, icon: Icon, path }) => (
-        <button className={route === path ? 'active' : ''} key={label} onClick={() => goTo(path)}><Icon size={21} /><span>{label}</span></button>
+        <button className={route === path ? 'active' : ''} key={label} onClick={() => goTo(path)}><Icon size={21} /><span>{label}</span>{label === 'Friends' && notifications > 0 && <b className="nav-notification">{Math.min(99, notifications)}</b>}</button>
       ))}
     </nav>
   )
@@ -362,7 +386,7 @@ function Checkpoint({ lesson, index, completed, unlocked, unavailable = false, d
   )
 }
 
-function Dashboard({ user, profile, completions, route, streak }: { user: User; profile: UserProfile; completions: string[]; route: string; streak: number }) {
+function Dashboard({ user, profile, completions, route, streak, notifications }: { user: User; profile: UserProfile; completions: string[]; route: string; streak: number; notifications: number }) {
   const root = useRef<HTMLDivElement>(null)
   const [focusTrack, setFocusTrack] = useState<FocusTrack | null>(profile.focusTrack ?? null)
   const [savingTrack, setSavingTrack] = useState(false)
@@ -406,7 +430,7 @@ function Dashboard({ user, profile, completions, route, streak }: { user: User; 
 
   return (
     <div className="app" ref={root}>
-      <Sidebar user={user} profile={profile} route={route} />
+      <Sidebar user={user} profile={profile} route={route} notifications={notifications} />
       <div className="workspace">
         <Topbar profile={profile} streak={streak} />
         <div className="content-grid">
@@ -563,7 +587,7 @@ function Dashboard({ user, profile, completions, route, streak }: { user: User; 
           </aside>
         </div>
       </div>
-      <BottomNav route={route} />
+      <BottomNav route={route} notifications={notifications} />
     </div>
   )
 }
@@ -756,8 +780,9 @@ function LessonPage({ user, lesson, completed }: { user: User; lesson: LessonCon
   )
 }
 
-function ProfilePage({ user, profile, completions, route, streak }: { user: User; profile: UserProfile; completions: string[]; route: string; streak: number }) {
+function ProfilePage({ user, profile, completions, route, streak, notifications }: { user: User; profile: UserProfile; completions: string[]; route: string; streak: number; notifications: number }) {
   const root = useRef<HTMLDivElement>(null)
+  const [codeCopied, setCodeCopied] = useState(false)
   const model = getModelChoice(profile.chosenModel)
   const focusLabel = profile.focusTrack ? `${profile.focusTrack[0].toUpperCase()}${profile.focusTrack.slice(1)}` : 'Not chosen yet'
 
@@ -767,14 +792,14 @@ function ProfilePage({ user, profile, completions, route, streak }: { user: User
   }, { scope: root })
 
   return <div className="app" ref={root}>
-    <Sidebar user={user} profile={profile} route={route} />
+    <Sidebar user={user} profile={profile} route={route} notifications={notifications} />
     <div className="workspace profile-workspace">
       <Topbar profile={profile} streak={streak} />
       <main className="profile-page">
         <section className="profile-hero">
           <div className="profile-identity">
-            {user.photoURL ? <img src={user.photoURL} alt="" referrerPolicy="no-referrer" /> : <div className="profile-avatar-fallback">{profile.displayName.slice(0, 2).toUpperCase()}</div>}
-            <div><p>Your learner profile</p><h1>{profile.displayName}</h1><span>{profile.email}</span></div>
+            {profile.photoURL ? <img src={profile.photoURL} alt="" referrerPolicy="no-referrer" /> : <div className="profile-avatar-fallback">{profile.username.slice(0, 2).toUpperCase()}</div>}
+            <div><p>Your learner profile</p><h1>{profile.username}</h1><span>{profile.email}</span></div>
           </div>
           <div className="profile-actions"><button className="secondary-action" onClick={() => goTo('/settings')}><Settings size={18} /> Settings</button><button className="signout-button" onClick={() => signOut()}><LogOut size={18} /> Sign out</button></div>
         </section>
@@ -788,14 +813,15 @@ function ProfilePage({ user, profile, completions, route, streak }: { user: User
           <article className="profile-bento-card focus-card"><span className="bento-icon"><Target size={24} /></span><small>Focus path</small><h2>{focusLabel}</h2><p>Specialized lessons stay matched to what you want AI to help you do.</p><button onClick={() => goTo('/')}>Change on path <ArrowRight size={17} /></button></article>
           <article className="profile-bento-card rank-preview"><span className="bento-icon"><Award size={24} /></span><small>Current rank</small><h2>{profile.rank}</h2><p>Level {profile.level}. Open the mineral ladder to see every division from I to V.</p><button onClick={() => goTo('/ranks')}>Open ranks <ArrowRight size={17} /></button></article>
           <article className="profile-bento-card streak-preview"><span className="bento-icon"><Flame size={24} fill="currentColor" /></span><small>Daily rhythm</small><h2>{streak} day{streak === 1 ? '' : 's'}</h2><p>Keep one small promise each day and grow a longer learning streak.</p><button onClick={() => goTo('/streak')}>Open streak <ArrowRight size={17} /></button></article>
+          <article className="profile-bento-card friend-code-card"><span className="bento-icon"><Users size={24} /></span><div><small>Your private invite key</small><h2>{profile.friendCode.match(/.{1,4}/g)?.join(' ')}</h2><p>Share this unique 12-character code with people you know. They can find you without your email.</p></div><div className="friend-code-actions"><button onClick={async () => { await navigator.clipboard.writeText(profile.friendCode); setCodeCopied(true); window.setTimeout(() => setCodeCopied(false), 1800) }}><Copy size={17} /> {codeCopied ? 'Copied' : 'Copy code'}</button><button onClick={() => goTo('/friends')}>Find friends <ArrowRight size={17} /></button></div></article>
         </section>
       </main>
     </div>
-    <BottomNav route={route} />
+    <BottomNav route={route} notifications={notifications} />
   </div>
 }
 
-function RankingPage({ user, profile, route, streak }: { user: User; profile: UserProfile; route: string; streak: number }) {
+function RankingPage({ user, profile, route, streak, notifications }: { user: User; profile: UserProfile; route: string; streak: number; notifications: number }) {
   const root = useRef<HTMLDivElement>(null)
   const progress = progressFromXp(profile.xp)
   const nextRank = rankFromLevel(profile.level + 1)
@@ -807,7 +833,7 @@ function RankingPage({ user, profile, route, streak }: { user: User; profile: Us
   }, { scope: root })
 
   return <div className="app" ref={root}>
-    <Sidebar user={user} profile={profile} route={route} />
+    <Sidebar user={user} profile={profile} route={route} notifications={notifications} />
     <div className="workspace ranking-workspace">
       <Topbar profile={profile} streak={streak} />
       <main className="ranking-page">
@@ -835,7 +861,7 @@ function RankingPage({ user, profile, route, streak }: { user: User; profile: Us
         </section>
       </main>
     </div>
-    <BottomNav route={route} />
+    <BottomNav route={route} notifications={notifications} />
   </div>
 }
 
@@ -846,7 +872,7 @@ const streakNotes = [
   ['Return without guilt', 'A missed day is data, not failure. Start a fresh chain with the smallest useful lesson.'],
 ]
 
-function StreakPage({ user, profile, completions, route, stats }: { user: User; profile: UserProfile; completions: string[]; route: string; stats: StreakStats }) {
+function StreakPage({ user, profile, completions, route, stats, notifications }: { user: User; profile: UserProfile; completions: string[]; route: string; stats: StreakStats; notifications: number }) {
   const root = useRef<HTMLDivElement>(null)
   const [noteIndex, setNoteIndex] = useState(0)
   const focusLessons = profile.focusTrack ? trackSections[profile.focusTrack].flatMap((section) => section.lessons) : []
@@ -863,7 +889,7 @@ function StreakPage({ user, profile, completions, route, stats }: { user: User; 
   }, { scope: root })
 
   return <div className="app" ref={root}>
-    <Sidebar user={user} profile={profile} route={route} />
+    <Sidebar user={user} profile={profile} route={route} notifications={notifications} />
     <div className="workspace streak-workspace">
       <Topbar profile={profile} streak={stats.current} />
       <main className="streak-page">
@@ -882,7 +908,103 @@ function StreakPage({ user, profile, completions, route, stats }: { user: User; 
         <div className="streak-marquee" aria-hidden="true"><div>{Array.from({ length: 2 }, (_, group) => <span className="marquee-group" key={group}>{Array.from({ length: 4 }, (_, repeat) => <b key={repeat}>SHOW UP <i>•</i> LEARN ONE THING <i>•</i> KEEP THE SPARK <i>•</i></b>)}</span>)}</div></div>
       </main>
     </div>
-    <BottomNav route={route} />
+    <BottomNav route={route} notifications={notifications} />
+  </div>
+}
+
+function FriendsPage({ user, profile, route, streak, notifications, requests, friends }: { user: User; profile: UserProfile; route: string; streak: number; notifications: number; requests: FriendRequest[]; friends: PublicProfile[] }) {
+  const root = useRef<HTMLDivElement>(null)
+  const [searchTerm, setSearchTerm] = useState('')
+  const [results, setResults] = useState<PublicProfile[]>([])
+  const [searching, setSearching] = useState(false)
+  const [searched, setSearched] = useState(false)
+  const [sentIds, setSentIds] = useState<Set<string>>(new Set())
+  const [requestIndex, setRequestIndex] = useState(0)
+  const [busyRequest, setBusyRequest] = useState('')
+  const [message, setMessage] = useState('')
+  const friendIds = useMemo(() => new Set(friends.map((friend) => friend.uid)), [friends])
+  const incomingIds = useMemo(() => new Set(requests.map((request) => request.fromUid)), [requests])
+  const activeRequest = requests.length ? requests[Math.min(requestIndex, requests.length - 1)] : null
+
+  const searchFriends = async (event: FormEvent) => {
+    event.preventDefault()
+    setSearching(true)
+    setSearched(true)
+    setMessage('')
+    try {
+      setResults(await searchPublicProfiles(user, searchTerm))
+    } catch (reason) {
+      setMessage((reason as Error).message || 'Search failed.')
+    } finally {
+      setSearching(false)
+    }
+  }
+
+  const addFriend = async (uid: string) => {
+    setMessage('')
+    try {
+      await sendFriendRequest(user, uid)
+      setSentIds((current) => new Set(current).add(uid))
+    } catch (reason) {
+      setMessage((reason as Error).message || 'Friend request could not be sent.')
+    }
+  }
+
+  const answerRequest = async (request: FriendRequest, response: 'accepted' | 'declined') => {
+    setBusyRequest(request.id)
+    setMessage('')
+    try {
+      await respondToFriendRequest(user, request, response)
+      setRequestIndex(0)
+    } catch (reason) {
+      setMessage((reason as Error).message || 'Friend request could not be updated.')
+    } finally {
+      setBusyRequest('')
+    }
+  }
+
+  useGSAP(() => {
+    gsap.from('.friends-hero-copy > *, .friends-hero-art', { y: 28, opacity: 0, stagger: .08, duration: .7, ease: 'power3.out' })
+    gsap.from('.friend-profile-card .friend-avatar', { scale: .8, opacity: .25, stagger: .08, ease: 'none', scrollTrigger: { trigger: '.friend-accordion', start: 'top 88%', end: 'bottom 70%', scrub: .7 } })
+    const media = gsap.matchMedia()
+    media.add('(min-width: 901px)', () => ScrollTrigger.create({ trigger: '.friends-library', start: 'top 110px', end: 'bottom bottom-=120', pin: '.friends-library-heading', pinSpacing: false }))
+    return () => media.revert()
+  }, { scope: root })
+
+  return <div className="app" ref={root}>
+    <Sidebar user={user} profile={profile} route={route} notifications={notifications} />
+    <div className="workspace friends-workspace">
+      <Topbar profile={profile} streak={streak} />
+      <main className="friends-page">
+        <section className="friends-hero">
+          <div className="friends-hero-copy"><p>Learn together</p><h1>Keep good company on the <span className="friends-inline-avatars">{friends.slice(0, 3).map((friend) => friend.photoURL ? <img src={friend.photoURL} alt="" key={friend.uid} /> : <i key={friend.uid}>{friend.username.slice(0, 1).toUpperCase()}</i>)}{friends.length === 0 && <i><Users size={30} /></i>}</span> trail.</h1><span>Find people by username or friend code, then follow each other’s streak and current lesson.</span></div>
+          <div className="friends-hero-art" aria-hidden="true"><Users size={92} /><i /><i /><i /></div>
+        </section>
+
+        <section className="friends-bento">
+          <article className="friend-search-panel">
+            <div><p>Find a learner</p><h2>Search the trail.</h2><span>Enter a username, the start of one, or a complete 12-character friend code.</span></div>
+            <form onSubmit={searchFriends}><Search size={20} /><input value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} placeholder="Username or friend code" aria-label="Username or friend code" /><button disabled={searching || !searchTerm.trim()}>{searching ? <LoaderCircle className="loading-spinner" size={18} /> : 'Search'}</button></form>
+            {searched && <div className="friend-search-results">{results.length === 0 && !searching ? <p>No learners found. Check the spelling or code.</p> : results.map((result) => { const isFriend = friendIds.has(result.uid); const incoming = incomingIds.has(result.uid); const sent = sentIds.has(result.uid); return <div key={result.uid}>{result.photoURL ? <img src={result.photoURL} alt="" /> : <span>{result.username.slice(0, 2).toUpperCase()}</span>}<div><strong>{result.username}</strong><small>{result.friendCode.match(/.{1,4}/g)?.join(' ')}</small></div><button disabled={isFriend || incoming || sent} onClick={() => addFriend(result.uid)} type="button">{isFriend ? <><UserCheck size={17} /> Friends</> : incoming ? 'Respond below' : sent ? 'Request sent' : <><UserPlus size={17} /> Add friend</>}</button></div> })}</div>}
+          </article>
+
+          <article className="friend-request-panel">
+            <div className="friend-panel-heading"><div><p>Invitations</p><h2>Friend requests</h2></div>{requests.length > 0 && <span>{requests.length}</span>}</div>
+            {activeRequest?.sender ? <div className="request-carousel"><div className="request-person">{activeRequest.sender.photoURL ? <img src={activeRequest.sender.photoURL} alt="" /> : <span>{activeRequest.sender.username.slice(0, 2).toUpperCase()}</span>}<div><strong>{activeRequest.sender.username}</strong><small>wants to learn with you</small></div></div><p>Accept to share streak and current lesson progress with each other.</p><div className="request-actions"><button className="decline-friend" onClick={() => answerRequest(activeRequest, 'declined')} disabled={busyRequest === activeRequest.id}><X size={17} /> Decline</button><button className="accept-friend" onClick={() => answerRequest(activeRequest, 'accepted')} disabled={busyRequest === activeRequest.id}>{busyRequest === activeRequest.id ? <LoaderCircle className="loading-spinner" size={17} /> : <Check size={17} />} Accept</button></div>{requests.length > 1 && <div className="request-carousel-controls"><button onClick={() => setRequestIndex((requestIndex - 1 + requests.length) % requests.length)} aria-label="Previous request"><ArrowLeft size={17} /></button><span>{requestIndex + 1} / {requests.length}</span><button onClick={() => setRequestIndex((requestIndex + 1) % requests.length)} aria-label="Next request"><ArrowRight size={17} /></button></div>}</div> : <div className="friend-empty"><UserCheck size={36} /><strong>No waiting requests</strong><span>New invitations will appear here.</span></div>}
+          </article>
+
+          <article className="friend-rhythm-panel"><Flame size={31} fill="currentColor" /><div><p>Your shared rhythm</p><strong>{friends.length ? `${friends.filter((friend) => friend.streak > 0).length} active today` : 'Build your circle'}</strong><span>{friends.length ? 'Open the cards below to see where everyone is learning.' : 'Search for a friend to start sharing progress.'}</span></div></article>
+        </section>
+
+        {message && <div className="auth-error friends-message" role="status">{message}</div>}
+
+        <section className="friends-library">
+          <div className="friends-library-heading"><p>Your circle</p><h2>Learning now.</h2><span>Friend activity updates as they complete lessons and keep their streak alive.</span></div>
+          <div className="friend-accordion">{friends.length ? friends.map((friend) => <article className="friend-profile-card" key={friend.uid}>{friend.photoURL ? <img className="friend-avatar" src={friend.photoURL} alt="" /> : <span className="friend-avatar friend-avatar-fallback">{friend.username.slice(0, 2).toUpperCase()}</span>}<div className="friend-card-copy"><small>{friend.currentLessonProgress}</small><h3>{friend.username}</h3><div><Flame size={17} fill="currentColor" /><strong>{friend.streak} day{friend.streak === 1 ? '' : 's'}</strong></div><p>{friend.currentLessonTitle || 'Starting the trail'}</p></div></article>) : <div className="friends-library-empty"><Users size={48} /><h3>Your circle is open.</h3><p>Search above and send the first invitation.</p></div>}</div>
+        </section>
+      </main>
+    </div>
+    <BottomNav route={route} notifications={notifications} />
   </div>
 }
 
@@ -893,15 +1015,91 @@ function SettingToggle({ checked, label, copy, onChange }: { checked: boolean; l
   </button>
 }
 
-function SettingsPage({ user, profile, route, streak }: { user: User; profile: UserProfile; route: string; streak: number }) {
+function AvatarCropper({ source, onCancel, onSave }: { source: string; onCancel: () => void; onSave: (photoURL: string) => void }) {
+  const canvas = useRef<HTMLCanvasElement>(null)
+  const image = useRef<HTMLImageElement | null>(null)
+  const [zoom, setZoom] = useState(1)
+  const [horizontal, setHorizontal] = useState(50)
+  const [vertical, setVertical] = useState(50)
+  const [ready, setReady] = useState(false)
+
+  useEffect(() => {
+    const nextImage = new Image()
+    nextImage.onload = () => { image.current = nextImage; setReady(true) }
+    nextImage.src = source
+  }, [source])
+
+  useEffect(() => {
+    if (!ready || !canvas.current || !image.current) return
+    const context = canvas.current.getContext('2d')
+    if (!context) return
+    const size = canvas.current.width
+    const scale = Math.max(size / image.current.naturalWidth, size / image.current.naturalHeight) * zoom
+    const width = image.current.naturalWidth * scale
+    const height = image.current.naturalHeight * scale
+    const x = -Math.max(0, width - size) * (horizontal / 100)
+    const y = -Math.max(0, height - size) * (vertical / 100)
+    context.clearRect(0, 0, size, size)
+    context.drawImage(image.current, x, y, width, height)
+  }, [ready, zoom, horizontal, vertical])
+
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') onCancel() }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [onCancel])
+
+  return <div className="crop-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel() }}>
+    <section className="crop-modal" role="dialog" aria-modal="true" aria-labelledby="crop-title">
+      <button className="crop-close" onClick={onCancel} aria-label="Close crop editor"><X size={20} /></button>
+      <div className="crop-preview"><canvas ref={canvas} width="320" height="320" aria-label="Profile image crop preview" /><span /></div>
+      <div className="crop-controls"><p>Shape your avatar</p><h2 id="crop-title">Choose what fits inside the circle.</h2><label><span>Zoom</span><input type="range" min="1" max="3" step="0.01" value={zoom} onChange={(event) => setZoom(Number(event.target.value))} /></label><label><span>Horizontal position</span><input type="range" min="0" max="100" value={horizontal} onChange={(event) => setHorizontal(Number(event.target.value))} /></label><label><span>Vertical position</span><input type="range" min="0" max="100" value={vertical} onChange={(event) => setVertical(Number(event.target.value))} /></label><div className="crop-actions"><button className="secondary-action" onClick={onCancel}>Cancel</button><button className="continue-button" disabled={!ready} onClick={() => canvas.current && onSave(canvas.current.toDataURL('image/jpeg', .82))}>Use this crop <Check size={18} /></button></div></div>
+    </section>
+  </div>
+}
+
+function SettingsPage({ user, profile, route, streak, notifications }: { user: User; profile: UserProfile; route: string; streak: number; notifications: number }) {
   const root = useRef<HTMLDivElement>(null)
+  const fileInput = useRef<HTMLInputElement>(null)
   const [preferences, setPreferences] = useState<UserPreferences>(profile.preferences ?? defaultPreferences)
+  const [username, setUsername] = useState(profile.username)
+  const [photoURL, setPhotoURL] = useState(profile.photoURL)
+  const [cropSource, setCropSource] = useState('')
+  const [identitySaving, setIdentitySaving] = useState(false)
+  const [identityMessage, setIdentityMessage] = useState('')
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const [confirmingDeactivation, setConfirmingDeactivation] = useState(false)
   const [deactivating, setDeactivating] = useState(false)
   const [error, setError] = useState('')
 
   useEffect(() => setPreferences(profile.preferences ?? defaultPreferences), [profile.preferences])
+  useEffect(() => { setUsername(profile.username); setPhotoURL(profile.photoURL) }, [profile.username, profile.photoURL])
+
+  const chooseAvatar = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+    if (!file.type.startsWith('image/')) { setError('Choose an image file.'); return }
+    if (file.size > 8 * 1024 * 1024) { setError('Choose an image smaller than 8 MB.'); return }
+    const reader = new FileReader()
+    reader.onload = () => setCropSource(String(reader.result ?? ''))
+    reader.onerror = () => setError('That image could not be opened.')
+    reader.readAsDataURL(file)
+  }
+
+  const saveIdentity = async () => {
+    setIdentitySaving(true)
+    setIdentityMessage('')
+    setError('')
+    try {
+      await saveProfileIdentity(user, username, photoURL)
+      setIdentityMessage('Profile saved')
+    } catch (reason) {
+      setError((reason as Error).message || 'Profile could not be saved.')
+    } finally {
+      setIdentitySaving(false)
+    }
+  }
 
   const updatePreference = async (next: UserPreferences) => {
     setPreferences(next)
@@ -933,7 +1131,7 @@ function SettingsPage({ user, profile, route, streak }: { user: User; profile: U
   }, { scope: root })
 
   return <div className="app" ref={root}>
-    <Sidebar user={user} profile={profile} route={route} />
+    <Sidebar user={user} profile={profile} route={route} notifications={notifications} />
     <div className="workspace settings-workspace">
       <Topbar profile={profile} streak={streak} />
       <main className="settings-page">
@@ -944,6 +1142,10 @@ function SettingsPage({ user, profile, route, streak }: { user: User; profile: U
 
         <div className="settings-status" aria-live="polite">{saveState === 'saving' ? 'Saving changes...' : saveState === 'saved' ? 'Changes saved' : saveState === 'error' ? 'Save failed' : 'Changes save automatically'}</div>
         <section className="settings-grid">
+          <article className="settings-card identity-card">
+            <div className="settings-card-heading"><span><CircleUserRound size={22} /></span><div><h2>Public profile</h2><p>Choose the name and picture friends will see.</p></div></div>
+            <div className="identity-editor"><button className="avatar-editor" onClick={() => fileInput.current?.click()} aria-label="Upload a profile picture">{photoURL ? <img src={photoURL} alt="" /> : <span>{username.slice(0, 2).toUpperCase()}</span>}<i><Camera size={18} /></i></button><input ref={fileInput} type="file" accept="image/*" onChange={chooseAvatar} hidden /><label><span>Username</span><input value={username} maxLength={20} onChange={(event) => setUsername(event.target.value.replace(/[^a-zA-Z0-9_]/g, ''))} placeholder="Your username" /><small>3–20 letters, numbers, or underscores. Usernames are unique.</small></label><div className="identity-save"><button className="continue-button" onClick={saveIdentity} disabled={identitySaving || username.length < 3}>{identitySaving ? <LoaderCircle className="loading-spinner" size={18} /> : <Check size={18} />} Save profile</button><span aria-live="polite">{identityMessage}</span></div></div>
+          </article>
           <article className="settings-card appearance-card">
             <div className="settings-card-heading"><span><Sun size={22} /></span><div><h2>Appearance</h2><p>Choose how Model Trail looks.</p></div></div>
             <div className="theme-switch" aria-label="Theme preference">
@@ -980,7 +1182,8 @@ function SettingsPage({ user, profile, route, streak }: { user: User; profile: U
         {error && <div className="auth-error settings-error" role="alert">{error}</div>}
       </main>
     </div>
-    <BottomNav route={route} />
+    <BottomNav route={route} notifications={notifications} />
+    {cropSource && <AvatarCropper source={cropSource} onCancel={() => setCropSource('')} onSave={(cropped) => { setPhotoURL(cropped); setCropSource(''); setIdentityMessage('Crop ready — save your profile') }} />}
   </div>
 }
 
@@ -1006,7 +1209,7 @@ function playPracticeTone(enabled: boolean, correct: boolean) {
 
 type PracticeSession = { title: string; bank: PracticeQuestion[]; questions: PracticeQuestion[] }
 
-function PracticePage({ user, profile, completions, route, streak }: { user: User; profile: UserProfile; completions: string[]; route: string; streak: number }) {
+function PracticePage({ user, profile, completions, route, streak, notifications }: { user: User; profile: UserProfile; completions: string[]; route: string; streak: number; notifications: number }) {
   const root = useRef<HTMLDivElement>(null)
   const model = getModelChoice(profile.chosenModel)
   const sections = useMemo(() => getPracticeSections(profile.focusTrack, model), [profile.focusTrack, model])
@@ -1105,7 +1308,7 @@ function PracticePage({ user, profile, completions, route, streak }: { user: Use
   const totalCompleted = sections.reduce((sum, section) => sum + section.lessons.filter((lesson) => completedSet.has(lesson.id)).length, 0)
 
   return <div className="app" ref={root}>
-    <Sidebar user={user} profile={profile} route={route} />
+    <Sidebar user={user} profile={profile} route={route} notifications={notifications} />
     <div className="workspace practice-workspace">
       <Topbar profile={profile} streak={streak} />
       <main className="practice-page">
@@ -1136,15 +1339,33 @@ function PracticePage({ user, profile, completions, route, streak }: { user: Use
         </section>
       </main>
     </div>
-    <BottomNav route={route} />
+    <BottomNav route={route} notifications={notifications} />
   </div>
 }
 
 export default function App() {
   const route = useRoute()
-  const { user, profile, completions, completionRecords, ready, error, setError } = useLearner()
+  const { user, profile, completions, completionRecords, friendRequests, friends, ready, error, setError } = useLearner()
   const streakStats = useMemo(() => calculateStreakStats(completionRecords), [completionRecords])
+  const notifications = friendRequests.filter((request) => !request.seenAt).length
+  const socialPath = useMemo(() => {
+    const focusLessons = profile?.focusTrack ? trackSections[profile.focusTrack].flatMap((section) => section.lessons) : []
+    return [...sectionOneLessons, ...sectionTwoLessons, ...promptLessons, ...adaptiveUsageLessons, ...focusLessons]
+  }, [profile?.focusTrack])
+  const socialCompleted = socialPath.filter((lesson) => completions.includes(lesson.id)).length
+  const routeLesson = route.startsWith('/lesson/') ? getLesson(route.replace('/lesson/', '')) : undefined
+  const socialLesson = routeLesson ?? socialPath.find((lesson) => !completions.includes(lesson.id))
   useAppliedPreferences(profile)
+
+  useEffect(() => {
+    if (route !== '/friends' || !user || !friendRequests.some((request) => !request.seenAt)) return
+    markFriendRequestsSeen(user, friendRequests).catch(() => undefined)
+  }, [route, user, friendRequests])
+
+  useEffect(() => {
+    if (!user || !profile || profile.deactivated) return
+    syncPublicProgress(user, streakStats.current, socialLesson?.id ?? '', socialLesson?.title ?? 'Path complete — practicing', `${socialCompleted}/${socialPath.length} lessons complete`).catch(() => undefined)
+  }, [user, profile, streakStats, socialLesson?.id, socialLesson?.title, socialCompleted, socialPath.length])
 
   if (!ready) return <LoadingScreen />
   if (!user) return <AuthScreen error={error} setError={setError} />
@@ -1174,10 +1395,11 @@ export default function App() {
     if (lesson) return <LessonPage user={user} lesson={lesson} completed={completions.includes(lesson.id)} />
   }
 
-  if (route === '/profile') return <ProfilePage user={user} profile={profile} completions={completions} route={route} streak={streakStats.current} />
-  if (route === '/ranks') return <RankingPage user={user} profile={profile} route={route} streak={streakStats.current} />
-  if (route === '/streak') return <StreakPage user={user} profile={profile} completions={completions} route={route} stats={streakStats} />
-  if (route === '/practice') return <PracticePage user={user} profile={profile} completions={completions} route={route} streak={streakStats.current} />
-  if (route === '/settings') return <SettingsPage user={user} profile={profile} route={route} streak={streakStats.current} />
-  return <Dashboard user={user} profile={profile} completions={completions} route={route} streak={streakStats.current} />
+  if (route === '/profile') return <ProfilePage user={user} profile={profile} completions={completions} route={route} streak={streakStats.current} notifications={notifications} />
+  if (route === '/ranks') return <RankingPage user={user} profile={profile} route={route} streak={streakStats.current} notifications={notifications} />
+  if (route === '/streak') return <StreakPage user={user} profile={profile} completions={completions} route={route} stats={streakStats} notifications={notifications} />
+  if (route === '/friends') return <FriendsPage user={user} profile={profile} route={route} streak={streakStats.current} notifications={notifications} requests={friendRequests} friends={friends} />
+  if (route === '/practice') return <PracticePage user={user} profile={profile} completions={completions} route={route} streak={streakStats.current} notifications={notifications} />
+  if (route === '/settings') return <SettingsPage user={user} profile={profile} route={route} streak={streakStats.current} notifications={notifications} />
+  return <Dashboard user={user} profile={profile} completions={completions} route={route} streak={streakStats.current} notifications={notifications} />
 }

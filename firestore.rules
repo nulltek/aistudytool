@@ -2,8 +2,24 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
     function owns(uid) {
-      return request.auth != null && request.auth.uid == uid;
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function validUsername(data) {
+      return data.username is string
+        && data.username.size() >= 3
+        && data.username.size() <= 20
+        && data.username.matches('^[A-Za-z0-9_]+$')
+        && data.usernameLower == data.username.lower();
+    }
+
+    function validPhoto(data) {
+      return data.photoURL is string && data.photoURL.size() <= 200000;
     }
 
     function isEasyLesson(lessonId) {
@@ -31,52 +47,57 @@ service cloud.firestore {
         );
     }
 
+    function validPreferences(data) {
+      return data.keys().hasOnly(['theme', 'soundEnabled', 'reducedMotion', 'emailReminders'])
+        && data.theme in ['light', 'dark', 'system']
+        && data.soundEnabled is bool
+        && data.reducedMotion is bool
+        && data.emailReminders is bool;
+    }
+
     match /users/{uid} {
       allow read: if owns(uid);
 
       allow create: if owns(uid)
         && request.resource.data.keys().hasOnly([
-          'displayName', 'email', 'photoURL', 'xp', 'gems', 'level', 'rank',
-          'completedCount', 'chosenModel', 'focusTrack', 'preferences', 'deactivated',
-          'createdAt', 'updatedAt'
+          'displayName', 'username', 'usernameLower', 'friendCode', 'email', 'photoURL',
+          'xp', 'gems', 'level', 'rank', 'completedCount', 'chosenModel', 'focusTrack',
+          'preferences', 'deactivated', 'createdAt', 'updatedAt'
         ])
+        && validUsername(request.resource.data)
+        && request.resource.data.friendCode is string
+        && request.resource.data.friendCode.size() == 12
+        && validPhoto(request.resource.data)
         && request.resource.data.xp == 0
         && request.resource.data.gems == 0
         && request.resource.data.level == 1
         && request.resource.data.rank == 'Bronze I'
         && request.resource.data.completedCount == 0
         && request.resource.data.deactivated == false
-        && request.resource.data.preferences.keys().hasOnly([
-          'theme', 'soundEnabled', 'reducedMotion', 'emailReminders'
-        ])
-        && request.resource.data.preferences.theme in ['light', 'dark', 'system']
-        && request.resource.data.preferences.soundEnabled is bool
-        && request.resource.data.preferences.reducedMotion is bool
-        && request.resource.data.preferences.emailReminders is bool
+        && validPreferences(request.resource.data.preferences)
+        && getAfter(/databases/$(database)/documents/usernames/$(request.resource.data.usernameLower)).data.uid == uid
+        && getAfter(/databases/$(database)/documents/friendCodes/$(request.resource.data.friendCode)).data.uid == uid
         && request.resource.data.createdAt == request.time
         && request.resource.data.updatedAt == request.time;
 
       allow update: if owns(uid)
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'displayName', 'photoURL', 'chosenModel', 'focusTrack', 'updatedAt',
-          'preferences', 'deactivated', 'deactivatedAt'
+          'displayName', 'username', 'usernameLower', 'friendCode', 'photoURL',
+          'chosenModel', 'focusTrack', 'updatedAt', 'preferences', 'deactivated', 'deactivatedAt'
         ])
+        && validUsername(request.resource.data)
+        && request.resource.data.friendCode is string
+        && request.resource.data.friendCode.size() == 12
+        && (!resource.data.keys().hasAny(['friendCode']) || request.resource.data.friendCode == resource.data.friendCode)
+        && validPhoto(request.resource.data)
+        && getAfter(/databases/$(database)/documents/usernames/$(request.resource.data.usernameLower)).data.uid == uid
+        && getAfter(/databases/$(database)/documents/friendCodes/$(request.resource.data.friendCode)).data.uid == uid
         && (!request.resource.data.keys().hasAny(['chosenModel'])
           || request.resource.data.chosenModel in ['chatgpt', 'claude', 'gemini', 'llama-local', 'deepseek'])
         && (!request.resource.data.keys().hasAny(['focusTrack'])
           || request.resource.data.focusTrack in ['coding', 'research', 'automation'])
-        && (!request.resource.data.keys().hasAny(['preferences'])
-          || (
-            request.resource.data.preferences.keys().hasOnly([
-              'theme', 'soundEnabled', 'reducedMotion', 'emailReminders'
-            ])
-            && request.resource.data.preferences.theme in ['light', 'dark', 'system']
-            && request.resource.data.preferences.soundEnabled is bool
-            && request.resource.data.preferences.reducedMotion is bool
-            && request.resource.data.preferences.emailReminders is bool
-          ))
-        && (!request.resource.data.keys().hasAny(['deactivated'])
-          || request.resource.data.deactivated is bool)
+        && (!request.resource.data.keys().hasAny(['preferences']) || validPreferences(request.resource.data.preferences))
+        && (!request.resource.data.keys().hasAny(['deactivated']) || request.resource.data.deactivated is bool)
         && (!request.resource.data.keys().hasAny(['deactivatedAt'])
           || request.resource.data.deactivatedAt == null
           || request.resource.data.deactivatedAt == request.time)
@@ -92,6 +113,102 @@ service cloud.firestore {
           && validCompletion(lessonId, request.resource.data);
         allow update, delete: if false;
       }
+
+      match /friends/{friendUid} {
+        allow read: if owns(uid);
+        allow create: if signedIn()
+          && request.auth.uid in [uid, friendUid]
+          && request.resource.data.keys().hasOnly(['friendUid', 'requestId', 'since'])
+          && request.resource.data.friendUid == friendUid
+          && request.resource.data.requestId is string
+          && request.resource.data.since == request.time
+          && getAfter(/databases/$(database)/documents/friendRequests/$(request.resource.data.requestId)).data.status == 'accepted'
+          && (
+            (getAfter(/databases/$(database)/documents/friendRequests/$(request.resource.data.requestId)).data.fromUid == uid
+              && getAfter(/databases/$(database)/documents/friendRequests/$(request.resource.data.requestId)).data.toUid == friendUid)
+            ||
+            (getAfter(/databases/$(database)/documents/friendRequests/$(request.resource.data.requestId)).data.fromUid == friendUid
+              && getAfter(/databases/$(database)/documents/friendRequests/$(request.resource.data.requestId)).data.toUid == uid)
+          );
+        allow update, delete: if false;
+      }
+    }
+
+    match /usernames/{usernameLower} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && !exists(/databases/$(database)/documents/usernames/$(usernameLower))
+        && request.resource.data.keys().hasOnly(['uid', 'createdAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.createdAt == request.time
+        && getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.usernameLower == usernameLower;
+      allow delete: if signedIn() && resource.data.uid == request.auth.uid;
+      allow update: if false;
+    }
+
+    match /friendCodes/{friendCode} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && !exists(/databases/$(database)/documents/friendCodes/$(friendCode))
+        && request.resource.data.keys().hasOnly(['uid', 'createdAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.createdAt == request.time
+        && getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.friendCode == friendCode;
+      allow update, delete: if false;
+    }
+
+    match /publicProfiles/{uid} {
+      allow read: if signedIn();
+      allow create, update: if owns(uid)
+        && request.resource.data.keys().hasOnly([
+          'uid', 'username', 'usernameLower', 'friendCode', 'photoURL', 'streak',
+          'currentLessonId', 'currentLessonTitle', 'currentLessonProgress', 'updatedAt'
+        ])
+        && request.resource.data.uid == uid
+        && validUsername(request.resource.data)
+        && request.resource.data.friendCode is string
+        && request.resource.data.friendCode.size() == 12
+        && validPhoto(request.resource.data)
+        && request.resource.data.streak is int
+        && request.resource.data.streak >= 0
+        && request.resource.data.currentLessonId is string
+        && request.resource.data.currentLessonId.size() <= 80
+        && request.resource.data.currentLessonTitle is string
+        && request.resource.data.currentLessonTitle.size() <= 100
+        && request.resource.data.currentLessonProgress is string
+        && request.resource.data.currentLessonProgress.size() <= 80
+        && getAfter(/databases/$(database)/documents/users/$(uid)).data.usernameLower == request.resource.data.usernameLower
+        && getAfter(/databases/$(database)/documents/users/$(uid)).data.friendCode == request.resource.data.friendCode
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if false;
+    }
+
+    match /friendRequests/{requestId} {
+      allow read: if signedIn() && request.auth.uid in [resource.data.fromUid, resource.data.toUid];
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['fromUid', 'toUid', 'status', 'seenAt', 'createdAt', 'updatedAt'])
+        && request.resource.data.fromUid == request.auth.uid
+        && request.resource.data.toUid is string
+        && request.resource.data.toUid != request.auth.uid
+        && request.resource.data.status == 'pending'
+        && request.resource.data.seenAt == null
+        && exists(/databases/$(database)/documents/publicProfiles/$(request.resource.data.fromUid))
+        && exists(/databases/$(database)/documents/publicProfiles/$(request.resource.data.toUid))
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+      allow update: if signedIn()
+        && request.auth.uid == resource.data.toUid
+        && resource.data.status == 'pending'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'seenAt', 'updatedAt'])
+        && request.resource.data.status in ['pending', 'accepted', 'declined']
+        && (request.resource.data.seenAt == null || request.resource.data.seenAt == request.time)
+        && request.resource.data.updatedAt == request.time
+        && (request.resource.data.status != 'accepted'
+          || (
+            existsAfter(/databases/$(database)/documents/users/$(resource.data.fromUid)/friends/$(resource.data.toUid))
+            && existsAfter(/databases/$(database)/documents/users/$(resource.data.toUid)/friends/$(resource.data.fromUid))
+          ));
+      allow delete: if false;
     }
   }
 }
