@@ -776,7 +776,7 @@ html[data-theme='dark'] .friend-rhythm-panel { color: #ffd9c0; background: #4a2b
 .division-strip span { height: 30px; display: grid; place-items: center; color: #a1a7a1; background: #e4e6e1; border: 1px solid #d8dbd5; border-radius: 8px; font-size: 9px; font-weight: 850; transition: .25s ease; }
 .division-strip span.passed { color: white; background: var(--rank-tone); border-color: var(--rank-tone); }
 .division-strip span.current { transform: translateY(-3px); box-shadow: 0 4px 0 color-mix(in srgb, var(--rank-tone), #000 28%), 0 9px 16px color-mix(in srgb, var(--rank-tone), transparent 76%); }
-.rank-explainer { position: relative; z-index: 3; margin-top: 34px; display: flex; align-items: center; gap: 14px; padding: 19px 21px; color: #435046; background: #edf7df; border: 1px solid #d5e9b6; border-radius: 16px; }
+.rank-explainer { position: relative; z-index: 3; margin-top: 76px; display: flex; align-items: center; gap: 14px; padding: 19px 21px; color: #435046; background: #edf7df; border: 1px solid #d5e9b6; border-radius: 16px; }
 .rank-explainer svg { flex: 0 0 auto; color: #668f23; }.rank-explainer strong, .rank-explainer span { display: block; }.rank-explainer strong { font-size: 12px; }.rank-explainer span { margin-top: 3px; color: #69736b; font-size: 11px; }
 
 .streak-page { width: min(100%, 1120px); margin: 0 auto; padding: 42px clamp(20px, 5vw, 60px) 110px; }
